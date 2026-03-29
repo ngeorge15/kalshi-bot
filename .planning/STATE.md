@@ -2,27 +2,29 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 2
-current_plan: Not started
-status: planning
-last_updated: "2026-03-29T11:20:47.211Z"
+current_phase: 02
+current_plan: 1
+status: executing
+last_updated: "2026-03-29T22:39:03.409Z"
 last_activity: 2026-03-29
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 8
+  completed_plans: 4
 ---
 
 # Project State
 
-**Current Phase:** 2
-**Status:** Ready to plan
+**Current Phase:** 02
+**Status:** Ready to execute
 **Last Activity:** 2026-03-29
-**Current Plan:** Not started
+**Current Plan:** 1
 
 ## Current Position
 
+Phase: 02 (data-pipelines-nba-weather-r2-r3) — EXECUTING
+Plan: 2 of 5
 Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS auth, SQLite schema + database layer, full KalshiClient with market discovery, orderbook, order placement, and portfolio operations. All 16 unit tests pass.
 
 ## Decisions
@@ -36,6 +38,9 @@ Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS 
 - _load_config() returns None on missing env vars so module-level singleton does not crash CI imports; tests instantiate Config() directly after monkeypatching
 - [Phase 01]: yes_price always sent on YES side; NO orders use 100-price_cents per Kalshi API convention
 - [Phase 01]: post_only=True default on place_limit_order enforces maker-only bias per design decision D-02
+- [Phase 02]: CACHE_DIR is a module-level attribute so tests can monkeypatch without changing function signatures
+- [Phase 02]: .gitignore data/ anchored to /data/ so src/data and tests/data are tracked as source code
+- [Phase 02]: cache_get_stale ignores TTL entirely — returns any cached value as upstream-failure fallback (D-04)
 
 ## Performance Metrics
 
@@ -44,7 +49,8 @@ Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS 
 | 01 | 01-01 | 2min | 2 | 11 |
 | 01 | 01-02 | 4min | 2 | 5 |
 | 01 | 01-03 | 2min | 1 | 2 |
+| Phase 02 P01 | 3min | 1 tasks | 13 files |
 
 ## Sessions
 
-Last session: 2026-03-29T11:20:47.198Z
+Last session: 2026-03-29T22:39:03.405Z
