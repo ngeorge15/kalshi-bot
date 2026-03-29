@@ -65,6 +65,7 @@ class Config:
 
         self.risk: dict = self._trading["risk"]
         self.markets: dict = self._trading["markets"]
+        self.cache: dict = self._trading.get("cache", {})
 
         logger.debug(
             "Config loaded: env=%s, base_url=%s, key_id=%s",

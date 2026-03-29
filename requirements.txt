@@ -4,3 +4,4 @@ python-dotenv>=1.0.1
 pytest==7.4.4
 pytest-mock==3.15.1
 responses==0.26.0
+nba_api==1.11.4

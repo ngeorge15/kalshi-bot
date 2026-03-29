@@ -135,4 +135,35 @@ CREATE INDEX IF NOT EXISTS idx_outcomes_ticker ON outcomes(ticker);
 CREATE INDEX IF NOT EXISTS idx_outcomes_settled_at ON outcomes(settled_at);
 CREATE INDEX IF NOT EXISTS idx_improvements_status ON improvements(status);
 
+-- Phase 2: NBA historical game results (populated on first run / --refresh-history)
+CREATE TABLE IF NOT EXISTS nba_game_results (
+    id              INTEGER PRIMARY KEY,
+    game_id         TEXT NOT NULL UNIQUE,
+    game_date       TEXT NOT NULL,
+    home_team_id    INTEGER NOT NULL,
+    away_team_id    INTEGER NOT NULL,
+    home_pts        INTEGER NOT NULL,
+    away_pts        INTEGER NOT NULL,
+    home_win        INTEGER NOT NULL,
+    season          TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_nba_results_date ON nba_game_results(game_date);
+CREATE INDEX IF NOT EXISTS idx_nba_results_season ON nba_game_results(season);
+
+-- Phase 2: NOAA historical daily weather (populated on first run / --refresh-history)
+CREATE TABLE IF NOT EXISTS noaa_daily_weather (
+    id              INTEGER PRIMARY KEY,
+    station_id      TEXT NOT NULL,
+    station_code    TEXT NOT NULL,
+    date            TEXT NOT NULL,
+    tmax_f          REAL,
+    tmin_f          REAL,
+    prcp_in         REAL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(station_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_noaa_station_date ON noaa_daily_weather(station_id, date);
+
 INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+INSERT OR IGNORE INTO schema_version (version) VALUES (2);

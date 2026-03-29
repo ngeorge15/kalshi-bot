@@ -1,9 +1,19 @@
 {
   "environment": "demo",
+  "cache": {
+    "ttl_seconds": {
+      "nws_forecast": 3600,
+      "player_stats": 21600,
+      "team_stats": 86400,
+      "schedule": 86400,
+      "historical": 604800
+    }
+  },
   "markets": {
     "nba": {
       "enabled": true,
       "market_types": ["games", "props", "totals", "futures"],
+      "player_trend_games": 5,
       "min_edge": {
         "games": 0.05,
         "spreads": 0.05,
