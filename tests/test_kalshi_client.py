@@ -11,11 +11,13 @@ Run integration tests (requires demo credentials + KALSHI_INTEGRATION=true):
 """
 
 import base64
+import json
 import os
 from unittest.mock import patch
 
 import pytest
 import requests
+import responses as responses_lib
 
 
 # ---------------------------------------------------------------------------
@@ -145,49 +147,218 @@ def test_dollars_to_cents():
     assert dollars_to_cents("1.0000") == 100
 
 
-def test_market_discovery_pagination():
+BASE_URL = "https://demo-api.kalshi.co/trade-api/v2"
+
+
+@responses_lib.activate
+def test_market_discovery_pagination(test_private_key_path):
     """get_markets_by_series follows cursor pagination across multiple pages."""
-    pass
+    from src.kalshi.client import KalshiClient
+
+    # Page 1: returns cursor "abc"
+    responses_lib.add(
+        responses_lib.GET,
+        f"{BASE_URL}/markets",
+        json={"markets": [{"ticker": "M1"}], "cursor": "abc"},
+        status=200,
+    )
+    # Page 2: returns empty cursor (last page)
+    responses_lib.add(
+        responses_lib.GET,
+        f"{BASE_URL}/markets",
+        json={"markets": [{"ticker": "M2"}], "cursor": ""},
+        status=200,
+    )
+
+    client = KalshiClient(
+        base_url=BASE_URL,
+        key_id="test-key",
+        private_key_path=test_private_key_path,
+    )
+    result = client.get_markets_by_series("KXNBAGAME")
+    assert result == [{"ticker": "M1"}, {"ticker": "M2"}]
 
 
-def test_get_event():
+@responses_lib.activate
+def test_get_event(test_private_key_path):
     """get_event returns event dict with markets list."""
-    pass
+    from src.kalshi.client import KalshiClient
+
+    responses_lib.add(
+        responses_lib.GET,
+        f"{BASE_URL}/events/EVT-123",
+        json={"event": {"event_ticker": "EVT-123", "markets": []}},
+        status=200,
+    )
+
+    client = KalshiClient(
+        base_url=BASE_URL,
+        key_id="test-key",
+        private_key_path=test_private_key_path,
+    )
+    result = client.get_event("EVT-123")
+    assert result["event_ticker"] == "EVT-123"
 
 
-def test_orderbook_parse():
+@responses_lib.activate
+def test_orderbook_parse(test_private_key_path):
     """get_orderbook parses _dollars format into cents tuples."""
-    pass
+    from src.kalshi.client import KalshiClient
+
+    responses_lib.add(
+        responses_lib.GET,
+        f"{BASE_URL}/markets/TICKER/orderbook",
+        json={
+            "orderbook_fp": {
+                "yes_dollars": [["0.6500", "10.00"], ["0.6000", "5.00"]],
+                "no_dollars": [["0.3500", "8.00"]],
+            }
+        },
+        status=200,
+    )
+
+    client = KalshiClient(
+        base_url=BASE_URL,
+        key_id="test-key",
+        private_key_path=test_private_key_path,
+    )
+    result = client.get_orderbook("TICKER")
+    assert result["yes_bids"] == [(65, 10.0), (60, 5.0)]
+    assert result["no_bids"] == [(35, 8.0)]
 
 
-def test_place_order_payload():
+@responses_lib.activate
+def test_place_order_payload(test_private_key_path):
     """place_limit_order sends correct JSON payload with ticker, side, price, count."""
-    pass
+    from src.kalshi.client import KalshiClient
+
+    captured_body = {}
+
+    def request_callback(request):
+        captured_body.update(json.loads(request.body))
+        return (200, {}, json.dumps({"order": {"order_id": "ord-1"}}))
+
+    responses_lib.add_callback(
+        responses_lib.POST,
+        f"{BASE_URL}/portfolio/orders",
+        callback=request_callback,
+        content_type="application/json",
+    )
+
+    client = KalshiClient(
+        base_url=BASE_URL,
+        key_id="test-key",
+        private_key_path=test_private_key_path,
+    )
+    client.place_limit_order("TICKER", "yes", "buy", 65, 10)
+
+    assert captured_body["ticker"] == "TICKER"
+    assert captured_body["side"] == "yes"
+    assert captured_body["type"] == "limit"
+    assert captured_body["yes_price"] == 65
+    assert captured_body["count"] == 10
+    assert captured_body["post_only"] is True
 
 
-def test_cancel_order():
+@responses_lib.activate
+def test_cancel_order(test_private_key_path):
     """cancel_order calls DELETE /portfolio/orders/{order_id}."""
-    pass
+    from src.kalshi.client import KalshiClient
+
+    responses_lib.add(
+        responses_lib.DELETE,
+        f"{BASE_URL}/portfolio/orders/order-123",
+        json={"order": {}, "reduced_by": 0},
+        status=200,
+    )
+
+    client = KalshiClient(
+        base_url=BASE_URL,
+        key_id="test-key",
+        private_key_path=test_private_key_path,
+    )
+    result = client.cancel_order("order-123")
+    assert result is not None
 
 
-def test_get_balance():
+@responses_lib.activate
+def test_get_balance(test_private_key_path):
     """get_balance returns balance_cents and portfolio_value_cents."""
-    pass
+    from src.kalshi.client import KalshiClient
+
+    responses_lib.add(
+        responses_lib.GET,
+        f"{BASE_URL}/portfolio/balance",
+        json={"balance": 10000, "portfolio_value": 5000},
+        status=200,
+    )
+
+    client = KalshiClient(
+        base_url=BASE_URL,
+        key_id="test-key",
+        private_key_path=test_private_key_path,
+    )
+    result = client.get_balance()
+    assert result == {"balance_cents": 10000, "portfolio_value_cents": 5000}
 
 
-def test_get_positions():
+@responses_lib.activate
+def test_get_positions(test_private_key_path):
     """get_positions returns list of position dicts."""
-    pass
+    from src.kalshi.client import KalshiClient
+
+    responses_lib.add(
+        responses_lib.GET,
+        f"{BASE_URL}/portfolio/positions",
+        json={"market_positions": [{"ticker": "T1"}]},
+        status=200,
+    )
+
+    client = KalshiClient(
+        base_url=BASE_URL,
+        key_id="test-key",
+        private_key_path=test_private_key_path,
+    )
+    result = client.get_positions()
+    assert result == [{"ticker": "T1"}]
 
 
-def test_get_fills():
+@responses_lib.activate
+def test_get_fills(test_private_key_path):
     """get_fills returns list of fill dicts with _dollars fields."""
-    pass
+    from src.kalshi.client import KalshiClient
+
+    responses_lib.add(
+        responses_lib.GET,
+        f"{BASE_URL}/portfolio/fills",
+        json={"fills": [{"fill_id": "f1", "yes_price_dollars": "0.65"}]},
+        status=200,
+    )
+
+    client = KalshiClient(
+        base_url=BASE_URL,
+        key_id="test-key",
+        private_key_path=test_private_key_path,
+    )
+    result = client.get_fills()
+    assert isinstance(result, list)
+    assert len(result) == 1
 
 
-def test_retry_config():
+@responses_lib.activate
+def test_retry_config(test_private_key_path):
     """Session has Retry adapter mounted with total=3, backoff_factor=1."""
-    pass
+    from src.kalshi.client import KalshiClient
+
+    client = KalshiClient(
+        base_url=BASE_URL,
+        key_id="test-key",
+        private_key_path=test_private_key_path,
+    )
+    adapter = client._session.get_adapter("https://")
+    retry = adapter.max_retries
+    assert retry.total == 3
+    assert retry.backoff_factor == 1
 
 
 # ---------------------------------------------------------------------------
