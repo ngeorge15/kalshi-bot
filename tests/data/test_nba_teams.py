@@ -216,14 +216,17 @@ def test_get_rest_days_no_previous_game():
 
 
 def test_get_rest_days_returns_correct_days():
-    """get_rest_days returns correct number of days since last game."""
-    # Team 1610612737 played Oct 30, reference date is Nov 3 => 4 days rest
+    """get_rest_days returns correct number of days since last game.
+
+    Oct 30 game -> Nov 3 reference: 3 rest days (Oct 31, Nov 1, Nov 2).
+    Basketball convention: rest_days = diff_in_days - 1.
+    """
     rest = get_rest_days(
         team_id=1610612737,
         schedule=HISTORICAL_SCHEDULE,
         reference_date=date(2024, 11, 3),
     )
-    assert rest == 4
+    assert rest == 3
 
 
 # ---------------------------------------------------------------------------
