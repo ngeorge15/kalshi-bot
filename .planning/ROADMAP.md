@@ -46,6 +46,14 @@ Build data ingestion for both domains. NBA pipeline: team stats, player stats (p
 - `data/cache.py` — TTL-based response caching
 - Working test: pull today's NBA schedule with team stats + player props data for a specific game, pull NYC temperature forecast with ensemble probabilities, map both to Kalshi market tickers
 
+**Plans:** 4 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Cache module, schema additions, config updates, dependency install
+- [ ] 02-02-PLAN.md — NBA teams, schedule, ELO, rest tracking, historical results
+- [ ] 02-03-PLAN.md — Weather pipeline: station map, NWS forecasts, NOAA historical
+- [ ] 02-04-PLAN.md — NBA players: stats, game logs, injuries, matchup context
+
 ### Phase 3: Prediction Models + Overfitting Guards [R4, R5, R6]
 
 Build prediction engines and the overfitting protection system. NBA: game model (moneyline/spread via ELO + team stats + injuries), totals model (pace-adjusted efficiency), player prop model (per-player projection with opponent matchup). Weather: temperature bracket model (NWS ensemble + bias correction), precipitation model. All models output calibrated probabilities.
