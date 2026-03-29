@@ -10,8 +10,8 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Data (local only)
-data/
+# Data (local only — runtime DB and cache files, not source)
+/data/
 *.db
 
 # Build
