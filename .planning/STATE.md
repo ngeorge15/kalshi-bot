@@ -5,13 +5,13 @@ milestone_name: milestone
 current_phase: 02
 current_plan: 1
 status: executing
-last_updated: "2026-03-29T22:39:03.409Z"
+last_updated: "2026-03-29T22:46:25.392Z"
 last_activity: 2026-03-29
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 8
-  completed_plans: 4
+  completed_plans: 6
 ---
 
 # Project State
@@ -24,7 +24,7 @@ progress:
 ## Current Position
 
 Phase: 02 (data-pipelines-nba-weather-r2-r3) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS auth, SQLite schema + database layer, full KalshiClient with market discovery, orderbook, order placement, and portfolio operations. All 16 unit tests pass.
 
 ## Decisions
@@ -41,6 +41,8 @@ Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS 
 - [Phase 02]: CACHE_DIR is a module-level attribute so tests can monkeypatch without changing function signatures
 - [Phase 02]: .gitignore data/ anchored to /data/ so src/data and tests/data are tracked as source code
 - [Phase 02]: cache_get_stale ignores TTL entirely — returns any cached value as upstream-failure fallback (D-04)
+- [Phase 02-data-pipelines-nba-weather-r2-r3]: RuntimeError for missing NOAA_API_TOKEN is pre-validated before try/except so it propagates rather than being swallowed as a transient failure
+- [Phase 02-data-pipelines-nba-weather-r2-r3]: NWS gridpoint resolution cached 86400s separately from forecast (3600s); grid cell assignments are permanent so longer TTL is correct
 
 ## Performance Metrics
 
@@ -50,7 +52,8 @@ Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS 
 | 01 | 01-02 | 4min | 2 | 5 |
 | 01 | 01-03 | 2min | 1 | 2 |
 | Phase 02 P01 | 3min | 1 tasks | 13 files |
+| Phase 02-data-pipelines-nba-weather-r2-r3 P03 | 5min | 2 tasks | 6 files |
 
 ## Sessions
 
-Last session: 2026-03-29T22:39:03.405Z
+Last session: 2026-03-29T22:46:25.388Z
