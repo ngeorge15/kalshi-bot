@@ -1,0 +1,51 @@
+{
+  "environment": "demo",
+  "markets": {
+    "nba": {
+      "enabled": true,
+      "market_types": ["games", "props", "totals", "futures"],
+      "min_edge": {
+        "games": 0.05,
+        "spreads": 0.05,
+        "totals": 0.05,
+        "props": 0.07,
+        "futures": 0.10
+      },
+      "max_position_per_trade": {
+        "games": 50,
+        "props": 25,
+        "futures": 10
+      }
+    },
+    "weather": {
+      "enabled": true,
+      "market_types": ["temperature", "precipitation", "severe"],
+      "cities": ["NYC", "CHI", "MIA", "AUS"],
+      "min_edge": {
+        "temperature": 0.03,
+        "precipitation": 0.05,
+        "severe": 0.08
+      },
+      "max_position_per_trade": {
+        "temperature": 100,
+        "precipitation": 50,
+        "severe": 25
+      }
+    }
+  },
+  "risk": {
+    "kelly_fraction": 0.25,
+    "max_portfolio_exposure_cents": 50000,
+    "max_daily_loss_cents": -10000,
+    "max_concurrent_positions": 10,
+    "max_same_game_positions": 3,
+    "max_same_city_weather_positions": 2
+  },
+  "validation": {
+    "min_out_of_sample_predictions": 50,
+    "improvement_cooldown_trades": 30,
+    "max_parameter_change_pct": 0.20,
+    "staleness_days": 30,
+    "significance_threshold": 0.05
+  }
+}
