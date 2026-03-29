@@ -18,9 +18,13 @@ from src.data.nba.history import fetch_historical_results, get_historical_result
 
 
 @pytest.fixture
-def mem_db():
-    """In-memory SQLite Database with schema initialized."""
-    return Database(":memory:")
+def mem_db(tmp_path):
+    """Temporary-file SQLite Database with schema initialized.
+
+    Uses a temp file rather than :memory: because Database re-opens connections
+    on every execute() call, which would lose an in-memory schema between calls.
+    """
+    return Database(str(tmp_path / "test.db"))
 
 
 def _make_game_rows(game_id: str, home_abbr: str, away_abbr: str,
