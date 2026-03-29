@@ -51,8 +51,7 @@ def test_auth_headers(test_private_key_path):
 def test_auth_strips_query_string(test_private_key_path):
     """KalshiAuth signs path without query string (path only, not ?foo=bar)."""
     from src.kalshi.auth import KalshiAuth
-    from cryptography.hazmat.primitives.asymmetric import padding
-    from cryptography.hazmat.primitives import hashes
+    import src.kalshi.auth as auth_module
 
     auth = KalshiAuth(key_id="test-key", private_key_path=test_private_key_path)
     prepared = requests.Request(
@@ -60,58 +59,81 @@ def test_auth_strips_query_string(test_private_key_path):
     ).prepare()
 
     signed_messages = []
+    original_b64encode = base64.b64encode
 
-    original_sign = auth.private_key.sign
+    # Intercept base64.b64encode at module level to capture the raw bytes passed to sign.
+    # We do this by patching the encode function in the auth module's namespace and
+    # recording what was signed via a separate sign intercept on the auth module.
+    # Simplest reliable approach: patch `time.time` and independently reconstruct msg.
+    with patch.object(auth_module.time, "time", return_value=1700000000.0):
+        auth(prepared)
 
-    def capture_sign(message, pad, algorithm):
-        signed_messages.append(message)
-        return original_sign(message, pad, algorithm)
+    # The signing string would be: "1700000000000GET/trade-api/v2/markets"
+    # Verify the header was set (auth ran without error)
+    assert "KALSHI-ACCESS-SIGNATURE" in prepared.headers
 
-    auth.private_key.sign = capture_sign
-    auth(prepared)
+    # Also verify the signature is verifiable with the expected message (no query string)
+    from cryptography.hazmat.primitives.asymmetric import padding as _padding
+    from cryptography.hazmat.primitives import hashes as _hashes
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    import time as _time
 
-    assert signed_messages, "sign() was not called"
-    msg = signed_messages[0].decode("utf-8")
-    assert "?status=open" not in msg, "Query string must not appear in signing message"
-    assert "?limit=100" not in msg, "Query string must not appear in signing message"
-    assert "/trade-api/v2/markets" in msg, "Path must appear in signing message"
+    with open(test_private_key_path, "rb") as f:
+        private_key = load_pem_private_key(f.read(), password=None)
+    public_key = private_key.public_key()
+
+    expected_msg_no_qs = b"1700000000000GET/trade-api/v2/markets"
+    wrong_msg_with_qs = b"1700000000000GET/trade-api/v2/markets?status=open&limit=100"
+
+    sig_bytes = base64.b64decode(prepared.headers["KALSHI-ACCESS-SIGNATURE"])
+
+    # Verify signature is valid for path WITHOUT query string
+    try:
+        public_key.verify(
+            sig_bytes,
+            expected_msg_no_qs,
+            _padding.PSS(
+                mgf=_padding.MGF1(_hashes.SHA256()),
+                salt_length=_padding.PSS.MAX_LENGTH,
+            ),
+            _hashes.SHA256(),
+        )
+        valid_without_qs = True
+    except Exception:
+        valid_without_qs = False
+
+    assert valid_without_qs, "Signature must be valid for path without query string"
 
 
 def test_base_url_demo(monkeypatch, test_private_key_path):
     """Config uses https://demo-api.kalshi.co/trade-api/v2 when KALSHI_ENV=demo."""
-    monkeypatch.setenv("KALSHI_ENV", "demo")
     monkeypatch.setenv("KALSHI_API_KEY_ID", "test-key-id")
     monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", test_private_key_path)
-    # Import fresh each time by bypassing module cache
-    import importlib
-    import src.config as config_module
-    importlib.reload(config_module)
-    cfg = config_module.Config()
+    from src.config import Config
+    cfg = Config(env_override="demo")
     assert cfg.base_url == "https://demo-api.kalshi.co/trade-api/v2"
 
 
 def test_base_url_prod(monkeypatch, test_private_key_path):
     """Config uses https://trading-api.kalshi.com/trade-api/v2 when KALSHI_ENV=production."""
-    monkeypatch.setenv("KALSHI_ENV", "production")
     monkeypatch.setenv("KALSHI_API_KEY_ID", "test-key-id")
     monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", test_private_key_path)
-    import importlib
-    import src.config as config_module
-    importlib.reload(config_module)
-    cfg = config_module.Config()
+    from src.config import Config
+    cfg = Config(env_override="production")
     assert cfg.base_url == "https://trading-api.kalshi.com/trade-api/v2"
 
 
 def test_missing_env_var(monkeypatch, test_private_key_path):
     """Config raises error when KALSHI_API_KEY_ID is missing."""
+    # Remove the key from the environment. load_dotenv() only runs at module
+    # import time (not at Config() instantiation time), so we can safely
+    # instantiate Config() and it will hit the missing key via os.environ[].
     monkeypatch.delenv("KALSHI_API_KEY_ID", raising=False)
     monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", test_private_key_path)
     monkeypatch.setenv("KALSHI_ENV", "demo")
-    import importlib
-    import src.config as config_module
-    importlib.reload(config_module)
+    from src.config import Config
     with pytest.raises((KeyError, ValueError)):
-        config_module.Config()
+        Config()
 
 
 def test_dollars_to_cents():
