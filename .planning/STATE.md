@@ -5,13 +5,13 @@ milestone_name: milestone
 current_phase: 02
 current_plan: 1
 status: executing
-last_updated: "2026-03-29T22:53:08.681Z"
+last_updated: "2026-03-29T22:57:20.255Z"
 last_activity: 2026-03-29
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 8
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -24,7 +24,7 @@ progress:
 ## Current Position
 
 Phase: 02 (data-pipelines-nba-weather-r2-r3) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS auth, SQLite schema + database layer, full KalshiClient with market discovery, orderbook, order placement, and portfolio operations. All 16 unit tests pass.
 
 ## Decisions
@@ -45,6 +45,8 @@ Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS 
 - [Phase 02-data-pipelines-nba-weather-r2-r3]: NWS gridpoint resolution cached 86400s separately from forecast (3600s); grid cell assignments are permanent so longer TTL is correct
 - [Phase 02]: ESPN JSON API as primary injury source with nba_api fallback per D-07
 - [Phase 02]: GTD/Questionable players flagged confidence=low not dropped per D-08
+- [Phase 02]: pipeline.py iterates STATIONS dict so adding a 5th station auto-includes it in both historical and daily refresh
+- [Phase 02]: Integration tests use @pytest.mark.integration + skip_without_integration fixture — consistent with Phase 01 pattern
 
 ## Performance Metrics
 
@@ -56,7 +58,8 @@ Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS 
 | Phase 02 P01 | 3min | 1 tasks | 13 files |
 | Phase 02-data-pipelines-nba-weather-r2-r3 P03 | 5min | 2 tasks | 6 files |
 | Phase 02 P02-04 | 4min | 1 tasks | 2 files |
+| Phase 02 P05 | 2min | 2 tasks | 3 files |
 
 ## Sessions
 
-Last session: 2026-03-29T22:53:08.677Z
+Last session: 2026-03-29T22:57:20.251Z
