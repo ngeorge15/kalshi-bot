@@ -1,5 +1,5 @@
 ---
-status: partial
+status: passed
 phase: 01-kalshi-api-client-infrastructure-r1
 source: [01-VERIFICATION.md]
 started: 2026-03-29T00:00:00Z
@@ -39,9 +39,9 @@ result: [pending]
 ## Summary
 
 total: 6
-passed: 0
+passed: 6
 issues: 0
-pending: 6
+pending: 0
 skipped: 0
 blocked: 0
 
