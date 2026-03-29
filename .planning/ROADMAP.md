@@ -28,7 +28,7 @@ Build the Kalshi API client with RSA-PSS auth, market/event discovery across all
 **Plans:** 3 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Project skeleton and Wave 0 test scaffolding
+- [x] 01-01-PLAN.md — Project skeleton and Wave 0 test scaffolding
 - [ ] 01-02-PLAN.md — Config singleton, RSA-PSS auth, SQLite schema + database layer
 - [ ] 01-03-PLAN.md — Kalshi API client with all CRUD operations
 
