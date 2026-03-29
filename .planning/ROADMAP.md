@@ -30,7 +30,7 @@ Build the Kalshi API client with RSA-PSS auth, market/event discovery across all
 Plans:
 - [x] 01-01-PLAN.md — Project skeleton and Wave 0 test scaffolding
 - [x] 01-02-PLAN.md — Config singleton, RSA-PSS auth, SQLite schema + database layer
-- [ ] 01-03-PLAN.md — Kalshi API client with all CRUD operations
+- [x] 01-03-PLAN.md — Kalshi API client with all CRUD operations
 
 ### Phase 2: Data Pipelines (NBA + Weather) [R2, R3]
 
