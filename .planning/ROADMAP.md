@@ -73,10 +73,10 @@ Overfitting guards: train/test/holdout splitter with temporal ordering, walk-for
 - `validation/guards.py` — sample size gate, dampening, cooldown, staleness, significance test, regime detection
 - Working test: predict tonight's NBA games (moneyline + total + 3 player props), predict tomorrow's NYC temperature bracket, run walk-forward validation on historical data, verify holdout is never touched during training
 
-**Plans:** 5 plans
+**Plans:** 1/5 plans executed
 
 Plans:
-- [ ] 03-00-PLAN.md — Wave 0: test scaffolds, exceptions, scikit-learn/scipy install
+- [x] 03-00-PLAN.md — Wave 0: test scaffolds, exceptions, scikit-learn/scipy install
 - [ ] 03-01-PLAN.md — NBA models: nba_game, nba_totals, nba_props with Platt calibration
 - [ ] 03-02-PLAN.md — Weather models: weather_temp, weather_precip, model_store versioning
 - [ ] 03-03-PLAN.md — Validation system: splitter, walk_forward, guards (6 checks), metrics, pipeline CLI

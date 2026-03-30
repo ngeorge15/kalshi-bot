@@ -2,29 +2,29 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 02
+current_phase: 03
 current_plan: 1
 status: executing
-last_updated: "2026-03-29T22:57:20.255Z"
-last_activity: 2026-03-29
+last_updated: "2026-03-30T03:47:20.304Z"
+last_activity: 2026-03-30
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 8
-  completed_plans: 8
+  total_plans: 13
+  completed_plans: 9
 ---
 
 # Project State
 
-**Current Phase:** 02
+**Current Phase:** 03
 **Status:** Ready to execute
-**Last Activity:** 2026-03-29
+**Last Activity:** 2026-03-30
 **Current Plan:** 1
 
 ## Current Position
 
-Phase: 02 (data-pipelines-nba-weather-r2-r3) — EXECUTING
-Plan: 5 of 5
+Phase: 03 (prediction-models-overfitting-guards-r4-r5-r6) — EXECUTING
+Plan: 2 of 5
 Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS auth, SQLite schema + database layer, full KalshiClient with market discovery, orderbook, order placement, and portfolio operations. All 16 unit tests pass.
 
 ## Decisions
@@ -47,6 +47,9 @@ Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS 
 - [Phase 02]: GTD/Questionable players flagged confidence=low not dropped per D-08
 - [Phase 02]: pipeline.py iterates STATIONS dict so adding a 5th station auto-includes it in both historical and daily refresh
 - [Phase 02]: Integration tests use @pytest.mark.integration + skip_without_integration fixture — consistent with Phase 01 pattern
+- [Phase 03]: xfail(strict=True) chosen over pytest.raises(ImportError) for stub tests — strict mode fails if tests unexpectedly pass before implementation
+- [Phase 03]: GuardViolation takes guard_name + message + optional details dict — callers identify which guard fired and extract numeric context
+- [Phase 03]: BootstrapModeError is separate from GuardViolation to distinguish runtime bootstrap status from guard enforcement
 
 ## Performance Metrics
 
@@ -59,7 +62,8 @@ Completed all 3 plans in Phase 01. Phase 01 complete: Config singleton, RSA-PSS 
 | Phase 02-data-pipelines-nba-weather-r2-r3 P03 | 5min | 2 tasks | 6 files |
 | Phase 02 P02-04 | 4min | 1 tasks | 2 files |
 | Phase 02 P05 | 2min | 2 tasks | 3 files |
+| Phase 03 P03-00 | 3min | 2 tasks | 16 files |
 
 ## Sessions
 
-Last session: 2026-03-29T22:57:20.251Z
+Last session: 2026-03-30T03:47:20.300Z
