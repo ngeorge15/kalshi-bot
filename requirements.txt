@@ -5,3 +5,7 @@ pytest==7.4.4
 pytest-mock==3.15.1
 responses==0.26.0
 nba_api==1.11.4
+scikit-learn==1.5.1
+scipy==1.13.1
+numpy==1.26.4
+pandas==2.2.2
