@@ -81,3 +81,52 @@ def test_significance_gate_blocks_high_p_value():
     with pytest.raises(GuardViolation) as exc_info:
         guards.check_significance(p_value=0.12)
     assert exc_info.value.guard_name == "significance"
+
+
+def test_regime_check_passes_on_same_distribution():
+    """check_regime() does not raise when both samples come from the same distribution (R6.8)."""
+    import numpy as np
+    from src.validation.guards import OverfittingGuards
+
+    rng = np.random.RandomState(42)
+    guards = OverfittingGuards()
+    guards.check_regime(rng.normal(0, 1, 100), rng.normal(0, 1, 100))
+
+
+def test_regime_check_blocks_distributional_shift():
+    """check_regime() raises GuardViolation when KS test detects a significant shift (R6.8)."""
+    import numpy as np
+    from src.validation.guards import OverfittingGuards
+    from src.models.exceptions import GuardViolation
+
+    rng = np.random.RandomState(42)
+    guards = OverfittingGuards()
+    with pytest.raises(GuardViolation) as exc_info:
+        guards.check_regime(rng.normal(0, 1, 100), rng.normal(5, 1, 100))
+    assert exc_info.value.guard_name == "regime_change"
+
+
+def test_force_override_requires_non_empty_reason():
+    """force_override() rejects an empty reason string (D-07)."""
+    from src.validation.guards import OverfittingGuards
+    from src.db.database import Database
+
+    guards = OverfittingGuards(db=Database(db_path=":memory:"))
+    with pytest.raises(ValueError):
+        guards.force_override("sample_size_gate", "", "nba_game")
+
+
+def test_force_override_logs_to_improvements_table(tmp_path):
+    """force_override() writes a 'guard_override' row to the improvements table (D-07)."""
+    from src.validation.guards import OverfittingGuards
+    from src.db.database import Database
+
+    db = Database(db_path=str(tmp_path / "test.db"))
+    guards = OverfittingGuards(db=db)
+    guards.force_override("sample_size_gate", "Initial deployment, bootstrap mode confirmed", "nba_game")
+
+    rows = db.fetchall("SELECT * FROM improvements WHERE type = 'guard_override'")
+    assert len(rows) == 1
+    assert "sample_size_gate" in rows[0]["description"]
+    assert rows[0]["risk_level"] == "high"
+    assert rows[0]["status"] == "applied"

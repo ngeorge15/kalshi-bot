@@ -17,6 +17,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+import numpy as np
+from scipy import stats
+
 from src.models.exceptions import GuardViolation
 
 logger = logging.getLogger(__name__)
@@ -197,6 +200,85 @@ class OverfittingGuards:
                 },
             )
         logger.debug("significance: PASS (p=%.4f)", p_value)
+
+    def check_regime(self, sample1, sample2) -> None:
+        """Alert on distributional shift between two feature samples (R6.8).
+
+        Runs a two-sample Kolmogorov-Smirnov test comparing a historical
+        feature distribution against a recent one. A significant shift means
+        the model is at risk of silently fitting to a new regime (e.g. NBA
+        schedule density change, seasonal weather transition) rather than
+        being explicitly retrained for it.
+
+        Args:
+            sample1: Historical feature sample (1D array-like).
+            sample2: Recent feature sample (1D array-like).
+
+        Raises:
+            GuardViolation: If the KS test p-value < SIGNIFICANCE_THRESHOLD.
+        """
+        arr1 = np.asarray(sample1, dtype=float)
+        arr2 = np.asarray(sample2, dtype=float)
+        ks_stat, p_value = stats.ks_2samp(arr1, arr2)
+
+        if p_value < SIGNIFICANCE_THRESHOLD:
+            raise GuardViolation(
+                guard_name="regime_change",
+                message=(
+                    f"Distributional shift detected: KS p-value {p_value:.4f} "
+                    f"< {SIGNIFICANCE_THRESHOLD} (ks_stat={ks_stat:.4f})"
+                ),
+                details={
+                    "ks_stat": float(ks_stat),
+                    "p_value": float(p_value),
+                    "sample1_size": len(arr1),
+                    "sample2_size": len(arr2),
+                },
+            )
+        logger.debug("regime_change: PASS (KS p=%.4f)", p_value)
+
+    def force_override(self, guard_name: str, reason: str, model_name: str) -> None:
+        """Bypass a guard violation with a mandatory reason, logged for accountability (D-07).
+
+        Per D-07: guards are hard blocks, but a human (or the evaluator, per
+        its own cooldown rules) can force past one by supplying a non-empty
+        reason. The bypass is written to the ``improvements`` table so it
+        shows up in the evaluator's audit trail rather than disappearing.
+
+        Args:
+            guard_name: Name of the guard being bypassed (e.g. 'sample_size_gate').
+            reason: Human-provided justification. Must be non-empty.
+            model_name: The model the override applies to.
+
+        Raises:
+            ValueError: If reason is empty or blank.
+            RuntimeError: If no database was provided to this guard instance.
+        """
+        if not reason or not reason.strip():
+            raise ValueError("force_override requires a non-empty reason (D-07)")
+        if self.db is None:
+            raise RuntimeError("Cannot log force_override without a database connection")
+
+        self.db.execute(
+            "INSERT INTO improvements "
+            "(type, target, description, risk_level, auto_approvable, "
+            "validated_on_n_samples, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "guard_override",
+                model_name,
+                f"[FORCE OVERRIDE] Guard '{guard_name}' bypassed. Reason: {reason}",
+                "high",
+                0,
+                0,
+                "applied",
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        logger.warning(
+            "FORCE OVERRIDE: guard '%s' bypassed for model '%s'. Reason: %s",
+            guard_name, model_name, reason,
+        )
 
     def run_all(
         self,
