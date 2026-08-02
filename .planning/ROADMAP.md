@@ -73,14 +73,14 @@ Overfitting guards: train/test/holdout splitter with temporal ordering, walk-for
 - `validation/guards.py` — sample size gate, dampening, cooldown, staleness, significance test, regime detection
 - Working test: predict tonight's NBA games (moneyline + total + 3 player props), predict tomorrow's NYC temperature bracket, run walk-forward validation on historical data, verify holdout is never touched during training
 
-**Plans:** 1/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 - [x] 03-00-PLAN.md — Wave 0: test scaffolds, exceptions, scikit-learn/scipy install
-- [ ] 03-01-PLAN.md — NBA models: nba_game, nba_totals, nba_props with Platt calibration
-- [ ] 03-02-PLAN.md — Weather models: weather_temp, weather_precip, model_store versioning
-- [ ] 03-03-PLAN.md — Validation system: splitter, walk_forward, guards (6 checks), metrics, pipeline CLI
-- [ ] 03-04-PLAN.md — Integration tests: Phase 3 end-to-end + human checkpoint
+- [x] 03-01-PLAN.md — NBA models: nba_game, nba_totals, nba_props with Platt calibration
+- [x] 03-02-PLAN.md — Weather models: weather_temp, weather_precip, model_store versioning
+- [x] 03-03-PLAN.md — Validation system: splitter, walk_forward, guards (6 checks), metrics, pipeline CLI
+- [x] 03-04-PLAN.md — Integration tests: Phase 3 end-to-end + human checkpoint
 
 ### Phase 4: Trading Engine (Edge Detection + Paper Trading) [R7, R8, R9]
 
@@ -93,6 +93,11 @@ Build the trading logic. Edge detector compares model probabilities to market pr
 - `trading/risk_manager.py` — daily loss limit, position limits, kill switch
 - `trading/ledger.py` — SQLite trade journal with market_type tagging
 - Working test: scan all open NBA + weather markets (games, props, futures, temperature, precip), rank by edge × liquidity × confidence, paper trade top signals as limit orders, log to database
+
+**Plans:** 1/1 plans complete
+
+Plans:
+- [x] 04-01-PLAN.md — Trading engine: edge_detector, position_sizer, risk_manager, order_manager, ledger
 
 ### Phase 5: Performance Tracking & Analytics [R10]
 
