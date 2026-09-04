@@ -165,5 +165,38 @@ CREATE TABLE IF NOT EXISTS noaa_daily_weather (
 );
 CREATE INDEX IF NOT EXISTS idx_noaa_station_date ON noaa_daily_weather(station_id, date);
 
+-- Phase 5: per-model-version feature importance, tracked over time (R10.4, D5-02)
+-- Evaluator (R11.1) reads SQLite only, so importances must live here, not in versions.json.
+CREATE TABLE IF NOT EXISTS feature_importance (
+    id              INTEGER PRIMARY KEY,
+    model_name      TEXT NOT NULL,
+    model_version   INTEGER NOT NULL,
+    feature_name    TEXT NOT NULL,
+    importance      REAL NOT NULL,
+    recorded_at     TEXT NOT NULL,
+    UNIQUE(model_name, model_version, feature_name)
+);
+CREATE INDEX IF NOT EXISTS idx_feature_importance_model
+    ON feature_importance(model_name, model_version);
+
+-- Phase 5: repeated market price sampling for edge decay analysis (R10.6, D5-03)
+-- Recorded for every market scanned, including ones we never traded -- that is where
+-- decay signal lives. hours_to_close is nullable: an unknown close time is legal.
+CREATE TABLE IF NOT EXISTS price_observations (
+    id              INTEGER PRIMARY KEY,
+    ticker          TEXT NOT NULL,
+    market_type     TEXT NOT NULL,
+    observed_at     TEXT NOT NULL,
+    yes_bid_cents   INTEGER,
+    yes_ask_cents   INTEGER,
+    mid_price_cents INTEGER NOT NULL,
+    model_prob      REAL,
+    edge_cents      INTEGER,
+    hours_to_close  REAL
+);
+CREATE INDEX IF NOT EXISTS idx_price_obs_ticker ON price_observations(ticker, observed_at);
+CREATE INDEX IF NOT EXISTS idx_price_obs_market_type ON price_observations(market_type);
+
 INSERT OR IGNORE INTO schema_version (version) VALUES (1);
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);
+INSERT OR IGNORE INTO schema_version (version) VALUES (3);

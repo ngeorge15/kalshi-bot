@@ -17,6 +17,7 @@ Usage:
 import logging
 import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -110,6 +111,38 @@ class Database:
             cursor = conn.execute(sql, params)
             conn.commit()
             return cursor
+        finally:
+            conn.close()
+
+    @contextmanager
+    def transaction(self):
+        """Yield a single connection for a batch of statements, committed once.
+
+        ``execute`` opens and closes a connection per statement, which is fine
+        for the handful of writes a trading loop makes but pathological for bulk
+        work (seeding, backfills, analytics writes).  This keeps one connection
+        open so ``cursor.lastrowid`` stays available for linking rows, and rolls
+        back the whole batch if any statement raises.
+
+        Usage:
+            with db.transaction() as conn:
+                pred_id = conn.execute(sql, params).lastrowid
+                conn.execute(other_sql, (pred_id, ...))
+
+        Yields:
+            An open ``sqlite3.Connection`` with foreign keys on and a
+            ``sqlite3.Row`` row factory.
+
+        Raises:
+            Exception: Re-raises anything the caller raises, after rolling back.
+        """
+        conn = self._get_connection()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
