@@ -1,0 +1,8 @@
+{
+  "run_kind": "synthetic",
+  "initial_cash_cents": 100000,
+  "fee_per_contract_cents": 2,
+  "slippage_cents": 1,
+  "max_quote_age_seconds": 60,
+  "allowed_market_types": ["temperature", "precipitation"]
+}

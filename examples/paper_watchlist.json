@@ -1,0 +1,22 @@
+[
+  {
+    "ticker": "REPLACE-WITH-REVIEWED-TEMPERATURE-TICKER",
+    "market_type": "temperature",
+    "event_key": "REPLACE-CITY-AND-OBSERVATION-DATE",
+    "latitude": 40.7794,
+    "longitude": -73.9692,
+    "rules_source": "REPLACE-WITH-REVIEWED-CONTRACT-RULES-URL",
+    "weather_spec": {
+      "date": "2026-09-05",
+      "utc_offset_hours": -5,
+      "lower_bound_f": 69.5,
+      "upper_bound_f": 72.5
+    },
+    "eligibility": {
+      "available": false,
+      "checked_at": "2026-09-04T00:00:00Z",
+      "expires_at": "2026-09-05T00:00:00Z",
+      "source": "REPLACE-WITH-CURRENT-AVAILABILITY-REVIEW"
+    }
+  }
+]

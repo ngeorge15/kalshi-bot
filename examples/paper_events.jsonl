@@ -1,0 +1,6 @@
+{"event_id":"q1","type":"quote","at":"2026-09-04T12:00:00Z","observed_at":"2026-09-04T12:00:00Z","ticker":"SYNTHETIC-NYC-TEMP","market_type":"temperature","event_key":"NYC-2026-09-04","close_at":"2026-09-04T13:00:00Z","available":true,"yes_asks":[[45,5]],"no_asks":[[60,20]]}
+{"event_id":"forecast1","type":"forecast","at":"2026-09-04T12:00:01Z","ticker":"SYNTHETIC-NYC-TEMP","yes_probability":0.7,"model_name":"synthetic_example","model_version":"1"}
+{"event_id":"q2","type":"quote","at":"2026-09-04T12:00:02Z","observed_at":"2026-09-04T12:00:02Z","ticker":"SYNTHETIC-NYC-TEMP","market_type":"temperature","event_key":"NYC-2026-09-04","close_at":"2026-09-04T13:00:00Z","available":true,"yes_asks":[[44,3],[45,5]],"no_asks":[[60,20]]}
+{"event_id":"q3","type":"quote","at":"2026-09-04T12:00:03Z","observed_at":"2026-09-04T12:00:03Z","ticker":"SYNTHETIC-NYC-TEMP","market_type":"temperature","event_key":"NYC-2026-09-04","close_at":"2026-09-04T13:00:00Z","available":true,"yes_asks":[[44,3],[45,5]],"no_asks":[[60,20]]}
+{"event_id":"cancel1","type":"cancel","at":"2026-09-04T12:00:04Z","order_id":"forecast1"}
+{"event_id":"settle1","type":"settlement","at":"2026-09-04T13:00:00Z","ticker":"SYNTHETIC-NYC-TEMP","result":"yes"}

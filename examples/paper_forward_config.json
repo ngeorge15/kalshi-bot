@@ -1,0 +1,8 @@
+{
+  "run_kind": "forward",
+  "initial_cash_cents": 100000,
+  "weather_sigma_f": 5.0,
+  "fee_per_contract_cents": 2,
+  "slippage_cents": 1,
+  "allowed_market_types": ["temperature"]
+}

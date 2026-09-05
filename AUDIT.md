@@ -124,3 +124,17 @@ Targeted regression/client/sizing run: 57 passed, 6 integration tests deselected
 `git diff --check` passed.
 All checks use mocked exchange interactions. No bot process, exchange order,
 live model retraining, or production configuration change was initiated.
+
+## Paper implementation update — 2026-09-04
+
+Implemented a standalone paper broker, event journal, report, CLI, strict weather
+baseline, and one-pass public-data observer. See README.md for runnable examples
+and explicit limitations. The historical exchange module findings above remain
+open for any future exchange integration; the paper path does not use them.
+
+Paper milestone validation: 60 focused paper tests passed; full offline suite
+550 passed, 13 live tests excluded, in 58.28 seconds. `git diff --check` and
+standard-library paper CLI smoke checks passed.
+
+No actual market watchlist was verified or exercised, no process was scheduled, and no exchange
+orders were placed. The only P&L observed here is a synthetic accounting fixture.

@@ -9,6 +9,23 @@ from the initial operational universe and verify weather availability before use
 Production requires a later explicit user decision. Exchange-write migration and
 the evaluator follow the paper milestone. See [AUDIT.md](AUDIT.md) for details.
 
+## Paper milestone implementation (2026-09-04)
+
+- [x] Separate transactional paper account, order/fill/settlement ledger, and CLI.
+- [x] Restart-safe event IDs, atomic reservations, persistent halts and risk limits.
+- [x] Later-quote fills, shared depth, conservative replenishment, assumed fees/slippage.
+- [x] Synthetic/replay/forward experiment labels and paired model/market Brier reports.
+- [x] Strict weather baseline with complete future-day snapshots and explicit bounds.
+- [x] Read-only public-data observation pass with an explicit availability watchlist.
+- [x] Offline examples, setup/input documentation, and adversarial regression tests.
+- [ ] Smoke-test actual available markets with reviewed watchlist and settlement rules.
+- [ ] Collect prospective forecasts and outcomes; calibrate uncertainty on archived errors.
+- [ ] Add event-clustered uncertainty estimates and a predeclared evaluation protocol.
+- [ ] Add observation scheduling, data health monitoring, and mark-to-market reporting.
+
+See [README.md](README.md) for runnable paper commands. This milestone does not
+establish a measured edge or authorize real-money trading.
+
 ## Milestone 1: Autonomous Trading Bot with Evaluator
 
 ### Phase 1: Kalshi API Client & Infrastructure [R1]
