@@ -200,28 +200,14 @@ class NBAPropsModel:
 
         return features, confidence
 
-    def train(
-        self,
-        prop_type: str = "pts",
-        n_estimators: int = 100,
-        max_depth: int = 3,
-        learning_rate: float = 0.1,
-    ) -> dict:
-        """Train a GBM model for the specified prop type.
+    def build_training_data(self, prop_type: str = "pts") -> tuple[np.ndarray, np.ndarray]:
+        """Assemble the (X, y) training matrix for one prop type.
 
-        Uses player game logs from the data pipeline to build training data.
-        Each game log entry becomes a training sample where label = 1 if the
-        player exceeded the median stat value for that prop type.
-
-        Args:
-            prop_type: One of :data:`PROP_TYPES`.
-            n_estimators: GBM number of estimators.
-            max_depth: GBM max tree depth.
-            learning_rate: GBM learning rate.
+        Split out of :meth:`train` so :mod:`src.analytics.recalibrate` can
+        shadow-train a candidate on identical features (see D-01 / D5-01).
 
         Returns:
-            Dict with keys ``'n_train'``, ``'n_test'``, ``'test_brier'``,
-            ``'version'``.
+            ``(X, y)`` with X shape ``(n, 7)`` matching ``FEATURE_NAMES[prop_type]``.
 
         Raises:
             InsufficientDataError: If fewer than 100 training samples.
@@ -298,6 +284,36 @@ class NBAPropsModel:
 
         X = np.array(rows)
         y = np.array(labels)
+        return X, y
+
+    def train(
+        self,
+        prop_type: str = "pts",
+        n_estimators: int = 100,
+        max_depth: int = 3,
+        learning_rate: float = 0.1,
+    ) -> dict:
+        """Train a GBM model for the specified prop type.
+
+        Uses player game logs from the data pipeline to build training data.
+        Each game log entry becomes a training sample where label = 1 if the
+        player exceeded the median stat value for that prop type.
+
+        Args:
+            prop_type: One of :data:`PROP_TYPES`.
+            n_estimators: GBM number of estimators.
+            max_depth: GBM max tree depth.
+            learning_rate: GBM learning rate.
+
+        Returns:
+            Dict with keys ``'n_train'``, ``'n_test'``, ``'test_brier'``,
+            ``'version'``.
+
+        Raises:
+            InsufficientDataError: If fewer than 100 training samples.
+            ValueError: If prop_type is invalid.
+        """
+        X, y = self.build_training_data(prop_type=prop_type)
 
         split_idx = int(len(X) * 0.8)
         X_train, X_test = X[:split_idx], X[split_idx:]

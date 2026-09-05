@@ -103,20 +103,14 @@ class NBATotalsModel:
             float(line),
         ]])
 
-    def train(
-        self,
-        n_estimators: int = 100,
-        max_depth: int = 3,
-        learning_rate: float = 0.1,
-    ) -> dict:
-        """Train GBM + Platt calibration on historical game results.
+    def build_training_data(self) -> tuple[np.ndarray, np.ndarray]:
+        """Assemble the (X, y) training matrix from historical game results.
 
-        Uses total points (home_pts + away_pts) and median total as the
-        initial line estimate for training data.
+        Split out of :meth:`train` so :mod:`src.analytics.recalibrate` can
+        shadow-train a candidate on identical features (see D-01 / D5-01).
 
         Returns:
-            Dict with keys ``'n_train'``, ``'n_test'``, ``'test_brier'``,
-            ``'version'``.
+            ``(X, y)`` with X shape ``(n, 5)`` matching :data:`FEATURE_NAMES`.
 
         Raises:
             InsufficientDataError: If fewer than 200 historical games.
@@ -159,6 +153,27 @@ class NBATotalsModel:
 
         X = np.array(rows)
         y = np.array(labels)
+        return X, y
+
+    def train(
+        self,
+        n_estimators: int = 100,
+        max_depth: int = 3,
+        learning_rate: float = 0.1,
+    ) -> dict:
+        """Train GBM + Platt calibration on historical game results.
+
+        Uses total points (home_pts + away_pts) and median total as the
+        initial line estimate for training data.
+
+        Returns:
+            Dict with keys ``'n_train'``, ``'n_test'``, ``'test_brier'``,
+            ``'version'``.
+
+        Raises:
+            InsufficientDataError: If fewer than 200 historical games.
+        """
+        X, y = self.build_training_data()
 
         split_idx = int(len(X) * 0.8)
         X_train, X_test = X[:split_idx], X[split_idx:]

@@ -128,20 +128,17 @@ class NBAGameModel:
             float(away_stats.get("NET_RATING", away_stats.get("net_rating", 0.0))),
         ]])
 
-    def train(
-        self,
-        n_estimators: int = 100,
-        max_depth: int = 3,
-        learning_rate: float = 0.1,
-    ) -> dict:
-        """Train GBM + Platt calibration on historical game results.
+    def build_training_data(self) -> tuple[np.ndarray, np.ndarray]:
+        """Assemble the (X, y) training matrix from historical game results.
 
-        Fetches data from ``get_historical_results()`` and builds features
-        using a rolling EloTracker updated sequentially (no future leakage).
+        Split out of :meth:`train` so :mod:`src.analytics.recalibrate` can
+        shadow-train a candidate on identical features without calling
+        ``train()`` -- which D-01 reserves for ``pipeline.py`` and which would
+        persist a new version.  Building the data is not training.
 
         Returns:
-            Dict with keys ``'n_train'``, ``'n_test'``, ``'test_brier'``,
-            ``'version'``.
+            ``(X, y)`` with X shape ``(n, 7)`` matching :data:`FEATURE_NAMES`,
+            ordered oldest game first.
 
         Raises:
             InsufficientDataError: If fewer than 200 historical games.
@@ -192,6 +189,27 @@ class NBAGameModel:
 
         X = np.array(rows)
         y = np.array(labels)
+        return X, y
+
+    def train(
+        self,
+        n_estimators: int = 100,
+        max_depth: int = 3,
+        learning_rate: float = 0.1,
+    ) -> dict:
+        """Train GBM + Platt calibration on historical game results.
+
+        Fetches data from ``get_historical_results()`` and builds features
+        using a rolling EloTracker updated sequentially (no future leakage).
+
+        Returns:
+            Dict with keys ``'n_train'``, ``'n_test'``, ``'test_brier'``,
+            ``'version'``.
+
+        Raises:
+            InsufficientDataError: If fewer than 200 historical games.
+        """
+        X, y = self.build_training_data()
 
         # Simple temporal split: 80/20
         split_idx = int(len(X) * 0.8)
