@@ -798,3 +798,74 @@ def importance_drift(db, model_name: str) -> dict:
             for name in sorted(names)
         },
     }
+
+
+# ----------------------------------------------------------------------
+# R10.2 -- reliability diagram rendering (the optional image layer, D5-04)
+# ----------------------------------------------------------------------
+
+
+def render_reliability_diagram(
+    bins: list[dict],
+    out_path: str,
+    title: str = "Reliability diagram",
+) -> str:
+    """Render calibration bins as a reliability diagram PNG (R10.2).
+
+    A thin layer over :func:`calibration_bins`, which holds all the logic.  This
+    draws what that function already computed, so the plot and the snapshot can
+    never disagree.
+
+    Uses matplotlib's Agg backend, selected before pyplot is imported, so this
+    works headless -- on a server, in CI, over SSH.  Empty bins are skipped
+    rather than plotted at zero, which would imply an observed frequency of 0
+    where there is simply no data.
+
+    Args:
+        bins: Output of :func:`calibration_bins`.
+        out_path: Destination PNG path. Parent directories are created.
+        title: Plot title.
+
+    Returns:
+        The path written.
+    """
+    import os
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    populated = [b for b in bins if b["count"] > 0]
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.plot([0, 1], [0, 1], linestyle="--", linewidth=1, color="grey",
+            label="Perfect calibration")
+
+    if populated:
+        x = [b["mean_predicted"] for b in populated]
+        y = [b["actual_frequency"] for b in populated]
+        sizes = [max(20.0, 6.0 * b["count"]) for b in populated]
+        ax.plot(x, y, marker="o", linewidth=1.5, label="Observed")
+        ax.scatter(x, y, s=sizes, alpha=0.35)
+    else:
+        ax.text(0.5, 0.5, "No settled predictions", ha="center", va="center",
+                transform=ax.transAxes)
+
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("Predicted probability")
+    ax.set_ylabel("Observed frequency")
+    ax.set_title(title)
+    ax.legend(loc="upper left")
+    ax.grid(alpha=0.25)
+
+    parent = os.path.dirname(out_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=110)
+    plt.close(fig)
+
+    logger.info("Wrote reliability diagram to %s", out_path)
+    return out_path
