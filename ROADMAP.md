@@ -1,5 +1,14 @@
 # ROADMAP
 
+## Audit follow-up (2026-09-04)
+
+**Current scope: local paper trading first; no real-money execution.** Build a
+virtual-cash broker and separate paper ledger, using read-only data and realistic
+fill/settlement simulation. Add Washington-aware market filtering; exclude NBA
+from the initial operational universe and verify weather availability before use.
+Production requires a later explicit user decision. Exchange-write migration and
+the evaluator follow the paper milestone. See [AUDIT.md](AUDIT.md) for details.
+
 ## Milestone 1: Autonomous Trading Bot with Evaluator
 
 ### Phase 1: Kalshi API Client & Infrastructure [R1]

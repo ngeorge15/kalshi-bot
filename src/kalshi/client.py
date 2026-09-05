@@ -15,6 +15,7 @@ Usage:
 
 import logging
 from typing import Optional
+from uuid import uuid4
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -39,6 +40,7 @@ class KalshiClient:
     """
 
     def __init__(self, base_url: str, key_id: str, private_key_path: str) -> None:
+        self.timeout = (5, 30)  # connect and read timeout, in seconds
         self.base_url = base_url
         self._auth = KalshiAuth(key_id, private_key_path)
         self._session = self._build_session()
@@ -58,7 +60,7 @@ class KalshiClient:
             total=3,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET", "POST", "DELETE"],
+            allowed_methods=["GET", "DELETE"],
             raise_on_status=False,
         )
         adapter = HTTPAdapter(max_retries=retry)
@@ -89,7 +91,7 @@ class KalshiClient:
         Raises:
             requests.HTTPError: If the response status is 4xx or 5xx.
         """
-        resp = self._session.get(f"{self.base_url}{path}", params=params)
+        resp = self._session.get(f"{self.base_url}{path}", params=params, timeout=self.timeout)
         resp.raise_for_status()
         return resp.json()
 
@@ -106,7 +108,7 @@ class KalshiClient:
         Raises:
             requests.HTTPError: If the response status is 4xx or 5xx.
         """
-        resp = self._session.post(f"{self.base_url}{path}", json=json)
+        resp = self._session.post(f"{self.base_url}{path}", json=json, timeout=self.timeout)
         resp.raise_for_status()
         return resp.json()
 
@@ -122,9 +124,25 @@ class KalshiClient:
         Raises:
             requests.HTTPError: If the response status is 4xx or 5xx.
         """
-        resp = self._session.delete(f"{self.base_url}{path}")
+        resp = self._session.delete(f"{self.base_url}{path}", timeout=self.timeout)
         resp.raise_for_status()
         return resp.json()
+
+    def _get_all_pages(self, path: str, key: str, params: dict) -> list[dict]:
+        """Read complete portfolio state; reject repeated pagination cursors."""
+        params = dict(params)
+        items: list[dict] = []
+        seen: set[str] = set()
+        while True:
+            response = self._get(path, params=params)
+            items.extend(response.get(key, []))
+            cursor = response.get("cursor")
+            if not cursor:
+                return items
+            if cursor in seen:
+                raise ValueError(f"Repeated pagination cursor for {path}")
+            seen.add(cursor)
+            params["cursor"] = cursor
 
     # ------------------------------------------------------------------
     # Market Discovery (R1.3)
@@ -256,9 +274,16 @@ class KalshiClient:
         Returns:
             Order dict from the API response.
         """
+        if side not in {"yes", "no"} or action not in {"buy", "sell"}:
+            raise ValueError("Invalid order side or action")
+        if type(price_cents) is not int or not 1 <= price_cents <= 99:
+            raise ValueError("price_cents must be an integer between 1 and 99")
+        if type(count) is not int or count <= 0:
+            raise ValueError("count must be a positive integer")
         yes_price = price_cents if side == "yes" else (100 - price_cents)
         payload = {
             "ticker": ticker,
+            "client_order_id": str(uuid4()),
             "side": side,
             "action": action,
             "type": "limit",
@@ -305,7 +330,7 @@ class KalshiClient:
         params: dict = {}
         if status:
             params["status"] = status
-        return self._get("/portfolio/orders", params=params).get("orders", [])
+        return self._get_all_pages("/portfolio/orders", "orders", params)
 
     def get_fills(
         self,
@@ -356,9 +381,7 @@ class KalshiClient:
         params: dict = {}
         if status:
             params["settlement_status"] = status
-        return self._get("/portfolio/positions", params=params).get(
-            "market_positions", []
-        )
+        return self._get_all_pages("/portfolio/positions", "market_positions", params)
 
     def get_settlements(self, limit: int = 100) -> list[dict]:
         """Retrieve settlement history.

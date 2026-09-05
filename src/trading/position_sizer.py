@@ -197,7 +197,7 @@ class PositionSizer:
 
         # Kelly says bet this fraction of bankroll
         bet_cents = int(adjusted_kelly * portfolio.balance_cents)
-        quantity = max(1, bet_cents // price_cents) if bet_cents > 0 else 0
+        quantity = min(bet_cents, portfolio.balance_cents) // price_cents
 
         if quantity <= 0:
             logger.debug(

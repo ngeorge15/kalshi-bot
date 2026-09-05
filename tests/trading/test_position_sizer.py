@@ -266,3 +266,14 @@ class TestSizedOrderDataclass:
         assert "quantity" in d
         assert "kelly_fraction" in d
         assert "market_ticker" in d
+
+
+def test_does_not_force_contract_above_kelly_budget(sizer):
+    assert sizer.size_position(_make_signal(), _make_portfolio(balance=40)) is None
+
+
+def test_quantity_never_exceeds_cash_with_large_kelly_multiplier():
+    sizer = PositionSizer(FakeConfig(kelly_fraction=100))
+    sized = sizer.size_position(_make_signal(), _make_portfolio(balance=100))
+    assert sized is not None
+    assert sized.quantity * 50 <= 100

@@ -54,6 +54,8 @@ class Config:
 
         # Environment: demo or production
         self.env: str = env_override if env_override is not None else os.getenv("KALSHI_ENV", "demo")
+        if self.env not in {"demo", "production"}:
+            raise ValueError("KALSHI_ENV must be demo or production")
         self.base_url: str = (
             self.DEMO_BASE_URL if self.env == "demo" else self.PROD_BASE_URL
         )
