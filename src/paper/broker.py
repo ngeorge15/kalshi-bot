@@ -382,10 +382,10 @@ class PaperBroker:
             return dict(row) if row else None
 
     def has_prediction(self, ticker: str, model_name: str, model_version: str) -> bool:
-        """Check whether the predeclared baseline already forecast this market."""
+        """Check for an eligible baseline forecast; stale attempts may retry."""
         with self._connect() as conn:
             return conn.execute("""SELECT 1 FROM paper_predictions WHERE ticker=?
-                AND model_name=? AND model_version=? LIMIT 1""", (ticker, model_name, model_version)).fetchone() is not None
+                AND model_name=? AND model_version=? AND market_yes_probability IS NOT NULL LIMIT 1""", (ticker, model_name, model_version)).fetchone() is not None
 
     def report(self) -> dict:
         """Return accounting and paired predictive scores without claiming an edge."""

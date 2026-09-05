@@ -1,6 +1,6 @@
 """One-pass, read-only weather observation using an explicitly reviewed watchlist."""
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import math
 from urllib.parse import quote, urlparse
 from uuid import uuid4
@@ -50,7 +50,10 @@ def asks_from_orderbook(payload: dict) -> dict:
     for side, opposite in (("yes", "no"), ("no", "yes")):
         levels = {}
         for price, quantity in book[f"{opposite}_dollars"] or []:
-            price, quantity = Decimal(str(price)), Decimal(str(quantity))
+            try:
+                price, quantity = Decimal(str(price)), Decimal(str(quantity))
+            except InvalidOperation as exc:
+                raise ValueError("Invalid fixed-point book level") from exc
             if not price.is_finite() or not quantity.is_finite() or not 0 <= price <= 1 or quantity < 0:
                 raise ValueError("Invalid fixed-point book level")
             cents = int(((1-price)*100).to_integral_value(rounding=ROUND_CEILING))

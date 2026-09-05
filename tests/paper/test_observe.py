@@ -121,3 +121,45 @@ def test_public_reader_only_uses_get_and_does_not_load_auth():
     session.get.return_value.status_code = 302
     with pytest.raises(ValueError, match="without redirects"):
         reader.get(MARKET_BASE + "/markets/TEST")
+
+
+def test_invalid_fixed_point_book_is_reported_as_data_error():
+    with pytest.raises(ValueError, match="fixed-point"):
+        asks_from_orderbook({"orderbook_fp": {"yes_dollars": [["bad", "1"]], "no_dollars": []}})
+
+
+def test_stale_forecast_attempt_does_not_freeze_first_valid_prediction(tmp_path):
+    current = [NOW]
+    broker = PaperBroker(str(tmp_path / "f.db"), PaperConfig(run_kind="forward"), clock=lambda: current[0])
+
+    class SlowReader(Reader):
+        def get(self, url):
+            result = super().get(url)
+            if url.endswith("/forecast/hourly"):
+                current[0] += timedelta(seconds=61)
+            return result
+
+    first = observe_once(broker, [watch()], SlowReader(), clock=lambda: current[0])
+    assert first[0]["forecast"]["reason"] == "stale_quote"
+    current[0] += timedelta(seconds=1)
+    second = observe_once(broker, [watch()], Reader(), clock=lambda: current[0])
+    assert second[0]["forecast"]["status"] == "resting"
+    assert broker.report()["prediction_count"] == 2  # invalid attempt retained, valid attempt eligible
+
+
+def test_eligibility_expires_during_request(tmp_path):
+    current = [NOW]
+    broker = PaperBroker(str(tmp_path / "f.db"), PaperConfig(run_kind="forward"), clock=lambda: current[0])
+    entry = watch()
+    entry["eligibility"]["expires_at"] = (NOW+timedelta(seconds=1)).isoformat()
+
+    class SlowReader(Reader):
+        def get(self, url):
+            result = super().get(url)
+            if url.endswith("/orderbook"):
+                current[0] += timedelta(seconds=2)
+            return result
+
+    result = observe_once(broker, [entry], SlowReader(), clock=lambda: current[0])
+    assert result[0]["reason"] == "eligibility_expired_during_fetch"
+    assert broker.report()["orders"] == []
