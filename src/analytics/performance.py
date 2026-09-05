@@ -550,3 +550,251 @@ def recompute_all_daily_pnl(db) -> list[dict]:
     rebuilt = [recompute_daily_pnl(db, r["d"]) for r in dates if r["d"]]
     logger.info("Rebuilt %d daily_pnl row(s)", len(rebuilt))
     return rebuilt
+
+
+# ----------------------------------------------------------------------
+# R10.4 -- Feature importance, tracked over time
+# ----------------------------------------------------------------------
+
+# Only these six stores hold a scikit-learn estimator.  The weather models are
+# not ML models at all: WeatherTempModel fits an additive bias correction and
+# WeatherPrecipModel blends a historical base rate with the NWS probability of
+# precipitation.  Neither exposes feature_importances_, so R10.4 does not apply
+# to them.  Listed explicitly rather than discovered because the mapping from a
+# store name to its feature-name list lives in the model modules.
+GBM_MODEL_STORES = (
+    "nba_game",
+    "nba_totals",
+    "nba_props_pts",
+    "nba_props_reb",
+    "nba_props_ast",
+    "nba_props_3pm",
+)
+
+
+def gbm_feature_names(model_name: str) -> list[str]:
+    """Return the ordered feature names for a GBM-backed model store.
+
+    Args:
+        model_name: One of :data:`GBM_MODEL_STORES`.
+
+    Returns:
+        Feature names in the order the model's feature vector packs them.
+
+    Raises:
+        ValueError: If *model_name* is not a GBM-backed store.
+    """
+    if model_name == "nba_game":
+        from src.models.nba_game import FEATURE_NAMES
+
+        return list(FEATURE_NAMES)
+    if model_name == "nba_totals":
+        from src.models.nba_totals import FEATURE_NAMES
+
+        return list(FEATURE_NAMES)
+    if model_name.startswith("nba_props_"):
+        from src.models.nba_props import FEATURE_NAMES
+
+        prop_type = model_name[len("nba_props_") :]
+        if prop_type not in FEATURE_NAMES:
+            raise ValueError(f"Unknown prop type in model name: {model_name}")
+        return list(FEATURE_NAMES[prop_type])
+    raise ValueError(
+        f"{model_name} is not a GBM-backed model store. Valid: {GBM_MODEL_STORES}"
+    )
+
+
+def extract_feature_importances(model, feature_names: list[str]) -> dict[str, float]:
+    """Pull per-feature importances out of a fitted estimator (R10.4).
+
+    Models are persisted as ``CalibratedClassifierCV(GradientBoostingClassifier,
+    cv=3)``, so the importances live on three separate inner estimators -- one
+    per calibration fold.  They are averaged, which is the standard reading of a
+    cross-fitted ensemble's importance.
+
+    Args:
+        model: A fitted ``CalibratedClassifierCV``, or any estimator exposing
+            ``feature_importances_`` directly.
+        feature_names: Names in feature-vector order.
+
+    Returns:
+        Mapping of feature name to mean importance, ordered as *feature_names*.
+
+    Raises:
+        ValueError: If no importances can be found, or their count does not
+            match *feature_names* -- a silent mismatch would mislabel every
+            feature, which is worse than failing.
+    """
+    inner = getattr(model, "calibrated_classifiers_", None)
+    if inner:
+        per_fold = [
+            clf.estimator.feature_importances_
+            for clf in inner
+            if hasattr(getattr(clf, "estimator", None), "feature_importances_")
+        ]
+        if not per_fold:
+            raise ValueError(
+                "CalibratedClassifierCV inner estimators expose no feature_importances_"
+            )
+        importances = np.mean(np.vstack(per_fold), axis=0)
+    elif hasattr(model, "feature_importances_"):
+        importances = np.asarray(model.feature_importances_, dtype=float)
+    else:
+        raise ValueError(
+            f"{type(model).__name__} exposes no feature_importances_ and is not "
+            "a CalibratedClassifierCV"
+        )
+
+    if len(importances) != len(feature_names):
+        raise ValueError(
+            f"Feature count mismatch: model has {len(importances)} importances, "
+            f"{len(feature_names)} names supplied"
+        )
+    return {name: float(value) for name, value in zip(feature_names, importances)}
+
+
+def record_feature_importances(
+    db,
+    model_name: str,
+    model_version: int,
+    model,
+    feature_names: list[str] | None = None,
+) -> dict[str, float]:
+    """Persist a model version's feature importances to SQLite (R10.4, D5-02).
+
+    Written to the ``feature_importance`` table so the Phase 6 evaluator can read
+    them over SQL (R11.1 confines it to SQLite reads).  The table's
+    ``UNIQUE(model_name, model_version, feature_name)`` makes re-recording the
+    same version idempotent via ``INSERT OR REPLACE``.
+
+    Args:
+        db: Database instance.
+        model_name: Model store name.
+        model_version: Version these importances belong to.
+        model: The fitted estimator.
+        feature_names: Defaults to :func:`gbm_feature_names` for *model_name*.
+
+    Returns:
+        The recorded name-to-importance mapping.
+    """
+    if feature_names is None:
+        feature_names = gbm_feature_names(model_name)
+
+    importances = extract_feature_importances(model, feature_names)
+    recorded_at = datetime.now(timezone.utc).isoformat()
+
+    with db.transaction() as conn:
+        for name, value in importances.items():
+            conn.execute(
+                """INSERT OR REPLACE INTO feature_importance
+                (model_name, model_version, feature_name, importance, recorded_at)
+                VALUES (?, ?, ?, ?, ?)""",
+                (model_name, model_version, name, value, recorded_at),
+            )
+
+    logger.info(
+        "Recorded %d feature importances for %s v%d",
+        len(importances),
+        model_name,
+        model_version,
+    )
+    return importances
+
+
+def record_model_version(
+    db,
+    model_name: str,
+    version: int,
+    parameters: dict | None = None,
+    metrics: dict | None = None,
+    training_data_hash: str = "",
+    is_active: bool = True,
+) -> None:
+    """Mirror a ModelStore version into the ``model_versions`` table (D5-02).
+
+    ``ModelStore`` persists to ``versions.json``, which remains authoritative for
+    loading artifacts.  This copies the metadata into SQL because the Phase 6
+    evaluator cannot read that file (R11.1).  The table has been in the schema
+    since v1 with nothing writing to it.
+
+    Marking a version active clears the flag on that model's other versions.
+    """
+    import json
+
+    if is_active:
+        db.execute(
+            "UPDATE model_versions SET is_active = 0 WHERE model_name = ?",
+            (model_name,),
+        )
+    db.execute(
+        """INSERT OR REPLACE INTO model_versions
+        (model_name, version, parameters_json, metrics_json,
+         training_data_hash, is_active, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            model_name,
+            version,
+            json.dumps(parameters or {}),
+            json.dumps(metrics or {}),
+            training_data_hash,
+            1 if is_active else 0,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+
+
+def get_importance_history(db, model_name: str) -> list[dict]:
+    """Feature importances for a model across versions, oldest version first.
+
+    This is the "tracked over time" half of R10.4 -- a feature whose importance
+    collapses between versions is exactly the drift the evaluator should notice.
+
+    Returns:
+        One dict per version with ``model_version``, ``recorded_at`` and
+        ``importances`` (name to value).
+    """
+    rows = db.fetchall(
+        """SELECT model_version, feature_name, importance, recorded_at
+           FROM feature_importance
+           WHERE model_name = ?
+           ORDER BY model_version ASC, feature_name ASC""",
+        (model_name,),
+    )
+    by_version: dict[int, dict] = {}
+    for r in rows:
+        entry = by_version.setdefault(
+            r["model_version"],
+            {
+                "model_version": r["model_version"],
+                "recorded_at": r["recorded_at"],
+                "importances": {},
+            },
+        )
+        entry["importances"][r["feature_name"]] = r["importance"]
+    return [by_version[v] for v in sorted(by_version)]
+
+
+def importance_drift(db, model_name: str) -> dict:
+    """Change in each feature's importance between the two latest versions.
+
+    Returns:
+        Dict with ``from_version``, ``to_version`` and ``drift`` (name to
+        delta).  ``drift`` is empty and the versions ``None`` when fewer than
+        two versions have been recorded.  Features present in only one version
+        are reported against 0.
+    """
+    history = get_importance_history(db, model_name)
+    if len(history) < 2:
+        return {"from_version": None, "to_version": None, "drift": {}}
+
+    previous, latest = history[-2], history[-1]
+    names = set(previous["importances"]) | set(latest["importances"])
+    return {
+        "from_version": previous["model_version"],
+        "to_version": latest["model_version"],
+        "drift": {
+            name: latest["importances"].get(name, 0.0)
+            - previous["importances"].get(name, 0.0)
+            for name in sorted(names)
+        },
+    }
