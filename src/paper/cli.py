@@ -90,6 +90,13 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("event", help="Apply one JSON event from stdin")
     observe = commands.add_parser("observe", help="One pass of read-only public weather observations")
     observe.add_argument("watchlist", help="Reviewed market specifications and availability in JSON")
+    observe.add_argument("--scheduled", action="store_true",
+                         help="Only observe tickers due since the last attempt, and journal the pass")
+    observe.add_argument("--interval-seconds", type=int, default=3600,
+                         help="Minimum gap between attempts on the same ticker")
+    coverage = commands.add_parser("coverage", help="Report collection coverage and gaps")
+    coverage.add_argument("watchlist")
+    coverage.add_argument("--interval-seconds", type=int, default=3600)
     report = commands.add_parser("report", help="Print accounting and paired Brier scores")
     report.add_argument("--output", help="Also save the JSON report")
     health = commands.add_parser("health", help="Report input-data health for the experiment")
@@ -119,8 +126,20 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("Use 'event' for forward observations; replay is not forward evidence")
             result = replay(broker, args.events)
         elif args.command == "observe":
-            from src.paper.observe import observe_once
-            result = observe_once(broker, json.loads(Path(args.watchlist).read_text()))
+            watchlist = json.loads(Path(args.watchlist).read_text())
+            if args.scheduled:
+                from src.paper.schedule import run_scheduled_pass
+                from datetime import datetime, timezone
+                result = run_scheduled_pass(broker, watchlist, datetime.now(timezone.utc),
+                                            interval_seconds=args.interval_seconds)
+            else:
+                from src.paper.observe import observe_once
+                result = observe_once(broker, watchlist)
+        elif args.command == "coverage":
+            from src.paper.schedule import coverage_report
+            from datetime import datetime, timezone
+            result = coverage_report(broker.db_path, json.loads(Path(args.watchlist).read_text()),
+                                     datetime.now(timezone.utc), args.interval_seconds)
         elif args.command == "event":
             result = broker.process(json.load(sys.stdin))
         elif args.command == "health":
@@ -146,7 +165,8 @@ def main(argv: list[str] | None = None) -> int:
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(rendered + "\n")
         print(rendered)
-        if args.command == "observe" and any(item["status"] == "error" for item in result):
+        observed = result.get("results", []) if isinstance(result, dict) else result
+        if args.command == "observe" and any(item["status"] == "error" for item in observed):
             return 2
         if args.command == "protocol-verify" and not result["valid"]:
             return 2

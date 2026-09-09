@@ -58,3 +58,16 @@ CREATE TABLE IF NOT EXISTS paper_settlements (
     settled_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS paper_orders_ticker ON paper_orders(ticker);
+
+-- Every scheduled observation attempt, including skips and errors. Gaps in a
+-- prospective series matter: a run that silently stopped for three days is not
+-- the same experiment as one that collected continuously, and only a durable
+-- record of attempts can tell them apart.
+CREATE TABLE IF NOT EXISTS paper_observation_runs (
+    id INTEGER PRIMARY KEY,
+    run_at TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reason TEXT
+);
+CREATE INDEX IF NOT EXISTS paper_observation_runs_ticker ON paper_observation_runs(ticker, run_at);

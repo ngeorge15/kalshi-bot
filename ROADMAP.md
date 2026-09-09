@@ -22,7 +22,9 @@ the evaluator follow the paper milestone. See [AUDIT.md](AUDIT.md) for details.
 - [ ] Collect prospective forecasts and outcomes; calibrate uncertainty on archived errors.
 - [x] Add event-clustered uncertainty estimates and a predeclared evaluation protocol.
 - [x] Add data health monitoring and mark-to-market reporting.
-- [ ] Add observation scheduling (health monitoring and mark-to-market are done; scheduling is not).
+- [x] Add observation scheduling with a durable attempt journal and coverage/gap reporting.
+- [x] Predeclare the weather research protocol before collection (`research/protocol-weather-v1.json`).
+- [ ] Review a real watchlist: actual tickers, verified settlement rules, Washington availability. **Blocks all data collection.**
 
 See [README.md](README.md) for runnable paper commands. This milestone does not
 establish a measured edge or authorize real-money trading.

@@ -1,0 +1,14 @@
+{
+  "hypothesis": "The strict hourly-normal weather baseline produces daily-high temperature bracket probabilities that score better than contemporaneous Kalshi market-implied probabilities, measured as event-clustered paired Brier improvement over settled city-day events collected prospectively in forward mode.",
+  "primary_metric": "event_clustered_brier_improvement_ci_low",
+  "secondary_metrics": [
+    "point_estimate",
+    "naive_per_market_brier_improvement",
+    "n_markets"
+  ],
+  "min_events": 120,
+  "decision_threshold": 0.02,
+  "stopping_rule": "Stop after 120 settled city-day events or 2026-12-31T00:00:00Z, whichever comes first. Collection continues to that fixed endpoint regardless of interim results; no interim analysis is used to decide whether to continue, extend, or halt.",
+  "run_kind": "forward",
+  "declared_by": "nikhi"
+}
