@@ -1,8 +1,7 @@
 """One-pass, read-only weather observation using an explicitly reviewed watchlist."""
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import math
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import requests
@@ -10,16 +9,23 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from src.paper.broker import PaperBroker, label, utc
+from src.paper.venue import DEFAULT_VENUE, KALSHI_MARKET_BASE, asks_from_orderbook  # noqa: F401
 
 
-MARKET_BASE = "https://external-api.kalshi.com/trade-api/v2"
+# Retained for callers and tests that referenced it before venues were split out.
+MARKET_BASE = KALSHI_MARKET_BASE
 NWS_BASE = "https://api.weather.gov"
+NWS_HOST = "api.weather.gov"
 
 
 class PublicData:
     """GET-only public data reader. No auth, credentials, or order methods."""
 
-    def __init__(self) -> None:
+    def __init__(self, venue=None) -> None:
+        # Allowed hosts come from the venue plus the weather source, so adding a
+        # venue does not mean editing a hardcoded allowlist here.
+        self.venue = venue or DEFAULT_VENUE
+        self.allowed_hosts = frozenset(self.venue.hosts) | {NWS_HOST}
         self.session = requests.Session()
         self.session.trust_env = False  # never load .netrc credentials
         self.session.headers.update({"User-Agent": "kalshi-bot-paper-research/1.0", "Accept": "application/json"})
@@ -30,7 +36,7 @@ class PublicData:
     def get(self, url: str) -> dict:
         """Fetch a public JSON resource on the two approved data hosts."""
         parsed = urlparse(url)
-        if parsed.scheme != "https" or parsed.netloc not in {"external-api.kalshi.com", "api.weather.gov"}:
+        if parsed.scheme != "https" or parsed.netloc not in self.allowed_hosts:
             raise ValueError("Unexpected public-data URL")
         response = self.session.get(url, timeout=(5, 30), allow_redirects=False)
         response.raise_for_status()
@@ -43,28 +49,8 @@ class PublicData:
         self.session.close()
 
 
-def asks_from_orderbook(payload: dict) -> dict:
-    """Complement opposite bids, rounding asks up and quantities down."""
-    book = payload["orderbook_fp"]
-    result = {}
-    for side, opposite in (("yes", "no"), ("no", "yes")):
-        levels = {}
-        for price, quantity in book[f"{opposite}_dollars"] or []:
-            try:
-                price, quantity = Decimal(str(price)), Decimal(str(quantity))
-            except InvalidOperation as exc:
-                raise ValueError("Invalid fixed-point book level") from exc
-            if not price.is_finite() or not quantity.is_finite() or not 0 <= price <= 1 or quantity < 0:
-                raise ValueError("Invalid fixed-point book level")
-            cents = int(((1-price)*100).to_integral_value(rounding=ROUND_CEILING))
-            count = int(quantity.to_integral_value(rounding=ROUND_FLOOR))
-            if 1 <= cents <= 99 and count:
-                levels[cents] = levels.get(cents, 0) + count
-        result[f"{side}_asks"] = [list(pair) for pair in sorted(levels.items())]
-    return result
-
-
-def observe_once(broker: PaperBroker, watchlist: list[dict], reader=None, clock=None) -> list[dict]:
+def observe_once(broker: PaperBroker, watchlist: list[dict], reader=None, clock=None,
+                 venue=None) -> list[dict]:
     """Observe reviewed temperature markets, paper fill, forecast once, and settle.
 
     Caller-supplied eligibility is not inferred from public market visibility.
@@ -75,8 +61,9 @@ def observe_once(broker: PaperBroker, watchlist: list[dict], reader=None, clock=
         raise ValueError("observe requires a separate forward paper experiment")
     if not isinstance(watchlist, list):
         raise ValueError("Watchlist must be a JSON list")
+    venue = venue or DEFAULT_VENUE
     owns_reader = reader is None
-    reader = reader or PublicData()
+    reader = reader or PublicData(venue=venue)
     clock = clock or (lambda: datetime.now(timezone.utc))
     results = []
     try:
@@ -104,8 +91,7 @@ def observe_once(broker: PaperBroker, watchlist: list[dict], reader=None, clock=
                 if entry["market_type"] != "temperature" or entry["market_type"] not in broker.config.allowed_market_types:
                     raise ValueError("Automatic observation currently supports enabled temperature markets only")
                 spec = entry["weather_spec"]
-                url = f"{MARKET_BASE}/markets/{quote(ticker, safe='')}"
-                market = reader.get(url)["market"]
+                market = venue.parse_market(reader.get(venue.market_url(ticker)))
                 if market["ticker"] != ticker:
                     raise ValueError("Market response ticker mismatch")
                 state = broker.market_state(ticker)
@@ -120,7 +106,7 @@ def observe_once(broker: PaperBroker, watchlist: list[dict], reader=None, clock=
                 if state and state["result"]:
                     raise ValueError("Public market state conflicts with a recorded settlement")
                 observed = clock()
-                book = reader.get(url + "/orderbook")
+                book = reader.get(venue.orderbook_url(ticker))
                 received = clock()
                 if received >= utc(eligibility["expires_at"]) and not broker.config.research_only:
                     if state:
@@ -131,12 +117,13 @@ def observe_once(broker: PaperBroker, watchlist: list[dict], reader=None, clock=
                 result = broker.process({"event_id": str(uuid4()), "type": "quote", "at": received.isoformat(),
                     "observed_at": observed.isoformat(), "ticker": ticker, "market_type": entry["market_type"],
                     "event_key": entry["event_key"], "close_at": market["close_time"],
-                    "available": market["status"] in {"active", "open"}, "weather_spec": spec,
+                    "available": market["is_open"], "weather_spec": spec,
                     "eligibility": eligibility, "rules_source": entry["rules_source"],
-                    "source_market": market, "source_orderbook": book, **asks_from_orderbook(book)})
+                    "source_market": market["raw"], "source_orderbook": book,
+                    **venue.parse_orderbook(book)})
                 result = {"ticker": ticker, "tradeable": not ineligible, **result}
                 results.append(result)
-                if market["status"] not in {"active", "open"} or received >= utc(market["close_time"]):
+                if not market["is_open"] or received >= utc(market["close_time"]):
                     continue
                 if broker.has_prediction(ticker, "weather_hourly_normal_baseline", "1"):
                     continue
