@@ -3,9 +3,15 @@
 Splits data chronologically (no shuffling) to prevent future leakage.
 Default ratio: 60% train, 20% test, 20% holdout.
 
-The holdout set is NEVER touched during training or tuning — only for final
-pre-deployment validation.  ``access_holdout()`` enforces this via a
-required ``allow_holdout`` flag.
+The holdout set is NEVER returned by :meth:`TemporalSplitter.split`.  Reaching
+it requires :meth:`TemporalSplitter.holdout` (data) or
+:meth:`TemporalSplitter.access_holdout` (indices) with an explicit
+``allow_holdout=True``, which is logged.
+
+An earlier version documented that protection while ``split()`` returned the
+holdout arrays unconditionally, so the gate could be bypassed simply by using
+the ordinary API — and the tests covering the gate never exercised that path.
+``split()`` now returns train and test only.
 
 Usage::
 
@@ -17,7 +23,10 @@ Usage::
     y = np.random.randint(0, 2, 100)
 
     splitter = TemporalSplitter(dates)
-    (X_train, X_test, X_holdout), (y_train, y_test, y_holdout) = splitter.split(X, y)
+    (X_train, X_test), (y_train, y_test) = splitter.split(X, y)
+
+    # Final pre-deployment validation only:
+    X_holdout, y_holdout = splitter.holdout(X, y, allow_holdout=True)
 """
 
 import logging
@@ -61,36 +70,69 @@ class TemporalSplitter:
 
     def split(
         self, X: np.ndarray, y: np.ndarray,
-    ) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray],
-               tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        """Split X and y into train, test, holdout by temporal order.
+    ) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
+        """Split X and y into train and test by temporal order.
+
+        The holdout tail is deliberately **not** returned.  Handing it back here
+        would make the write-protection on :meth:`holdout` decorative, since no
+        caller would ever need to ask for it.
 
         Args:
             X: Feature matrix shape ``(n_samples, n_features)``.
             y: Labels array shape ``(n_samples,)``.
 
         Returns:
-            Tuple of ``((X_train, X_test, X_holdout), (y_train, y_test, y_holdout))``.
+            ``((X_train, X_test), (y_train, y_test))``.
         """
-        # Sort by date
-        sort_idx = np.argsort(self.dates)
-        X_sorted = X[sort_idx]
-        y_sorted = y[sort_idx]
-
-        X_train = X_sorted[:self._train_end]
-        X_test = X_sorted[self._train_end:self._test_end]
-        X_holdout = X_sorted[self._test_end:]
-
-        y_train = y_sorted[:self._train_end]
-        y_test = y_sorted[self._train_end:self._test_end]
-        y_holdout = y_sorted[self._test_end:]
-
+        X_sorted, y_sorted = self._sorted(X, y)
+        X_train, X_test = X_sorted[:self._train_end], X_sorted[self._train_end:self._test_end]
+        y_train, y_test = y_sorted[:self._train_end], y_sorted[self._train_end:self._test_end]
         logger.info(
-            "Temporal split: train=%d, test=%d, holdout=%d",
-            len(X_train), len(X_test), len(X_holdout),
+            "Temporal split: train=%d, test=%d, holdout=%d withheld",
+            len(X_train), len(X_test), len(X_sorted) - self._test_end,
         )
+        return (X_train, X_test), (y_train, y_test)
 
-        return (X_train, X_test, X_holdout), (y_train, y_test, y_holdout)
+    def _sorted(self, X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Return X and y reordered by ascending date."""
+        sort_idx = np.argsort(self.dates)
+        return X[sort_idx], y[sort_idx]
+
+    def holdout(
+        self, X: np.ndarray, y: np.ndarray, allow_holdout: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return the holdout data, gated behind an explicit flag.
+
+        Args:
+            X: Feature matrix.
+            y: Labels array.
+            allow_holdout: Must be explicitly ``True``.
+
+        Returns:
+            ``(X_holdout, y_holdout)``.
+
+        Raises:
+            PermissionError: If ``allow_holdout`` is not ``True``.
+        """
+        if not allow_holdout:
+            raise PermissionError(
+                "Holdout access denied. Holdout data is write-protected per "
+                "PROJECT.md overfitting policy. Pass allow_holdout=True only "
+                "for final pre-deployment validation."
+            )
+        self._holdout_accessed = True
+        logger.warning("HOLDOUT ACCESSED — this should only happen for final validation")
+        X_sorted, y_sorted = self._sorted(X, y)
+        return X_sorted[self._test_end:], y_sorted[self._test_end:]
+
+    @property
+    def holdout_accessed(self) -> bool:
+        """Whether the holdout has been reached in this splitter's lifetime.
+
+        Lets a training routine assert it never touched the holdout, and lets a
+        provenance record state so.
+        """
+        return self._holdout_accessed
 
     def access_holdout(self, allow_holdout: bool = False) -> np.ndarray:
         """Return holdout indices with write-protection enforcement.

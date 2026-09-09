@@ -104,7 +104,8 @@ class TestPhase3Unit:
         y = np.random.randint(0, 2, n)
 
         splitter = TemporalSplitter(dates)
-        (X_train, X_test, X_holdout), (y_train, y_test, y_holdout) = splitter.split(X, y)
+        (X_train, X_test), (y_train, y_test) = splitter.split(X, y)
+        X_holdout, _ = splitter.holdout(X, y, allow_holdout=True)
 
         assert len(X_train) == 60
         assert len(X_test) == 20
@@ -266,17 +267,27 @@ class TestPhase3Unit:
         X = np.random.randn(n, 8)
         y = np.random.randint(0, 2, n)
         splitter = TemporalSplitter(dates)
-        (X_train, X_test, X_holdout), (y_train, y_test, y_holdout) = splitter.split(X, y)
+        (X_train, X_test), (y_train, y_test) = splitter.split(X, y)
+
+        # The ordinary API must not hand the holdout over. This assertion is the
+        # point of the test: previously split() returned the holdout arrays, so
+        # a training loop already held them before any gate was consulted.
+        assert len(X_train) + len(X_test) == 80
+        assert splitter.holdout_accessed is False
 
         def malicious_training_loop():
             return splitter.access_holdout()  # raises PermissionError
 
         with pytest.raises(PermissionError):
             malicious_training_loop()
+        with pytest.raises(PermissionError):
+            splitter.holdout(X, y)
+        assert splitter.holdout_accessed is False
 
         holdout_idx = splitter.access_holdout(allow_holdout=True)
         X_holdout_explicit = X[holdout_idx]
         assert len(X_holdout_explicit) > 0
+        assert splitter.holdout_accessed is True
 
 
 # ---------------------------------------------------------------------------
