@@ -12,6 +12,8 @@ import sqlite3
 from typing import Callable, Iterator
 
 from src.paper.config import PaperConfig
+from src.paper.events import cluster_summary, degenerate_clustering
+from src.paper.uncertainty import cluster_bootstrap_ci, paired_brier_by_event
 
 
 def utc(value: str) -> datetime:
@@ -34,6 +36,32 @@ def label(value: str, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a nonempty string")
     return value
+
+
+
+def _clustered_scores(pairs: list[dict]) -> dict:
+    """Summarise one model's paired Brier scores with events as the unit.
+
+    Correlated bracket markets on the same event are not independent
+    observations, so the per-market mean understates uncertainty.  This weights
+    each event equally and resamples whole events for the interval.
+
+    Args:
+        pairs: Rows with ``event_key``, ``model_brier`` and ``market_brier``.
+
+    Returns:
+        Event-weighted point estimates, a bootstrap interval (``ci_low`` and
+        ``ci_high`` are ``None`` below two events, where variability cannot be
+        estimated), cluster shape, and a degeneracy verdict.
+    """
+    paired = paired_brier_by_event(pairs)
+    interval = cluster_bootstrap_ci(pairs)
+    return {"n_events": paired["n_events"], "n_markets": paired["n_markets"],
+            "model_brier": paired["model_brier"], "market_brier": paired["market_brier"],
+            "brier_improvement": paired["brier_improvement"],
+            "ci_low": interval["ci_low"], "ci_high": interval["ci_high"],
+            "confidence": interval["confidence"], "n_resamples": interval["n_resamples"],
+            "clustering": cluster_summary(pairs), "degenerate": degenerate_clustering(pairs)}
 
 
 class PaperBroker:
@@ -398,8 +426,17 @@ class PaperBroker:
             settlements = [dict(row) for row in conn.execute("SELECT * FROM paper_settlements ORDER BY settled_at")]
             # One earliest forecast per model/version/market, including skipped
             # decisions, so order frequency and fills do not weight Brier scores.
-            predictions = [dict(row) for row in conn.execute("""SELECT p.*, m.result FROM paper_predictions p
+            predictions = [dict(row) for row in conn.execute("""SELECT p.*, m.result, m.event_key FROM paper_predictions p
                 JOIN paper_markets m USING(ticker) ORDER BY p.created_at, p.rowid""")]
+            # Valuation uses the experiment clock (last processed event), never
+            # wall-clock time, so a reopened broker reports identically.
+            # Imported here: marks imports utc from this module, so a top-level
+            # import would be circular. cli.py uses the same pattern for observe.
+            from src.paper.marks import equity_at_market
+            valued_at = utc(account["last_event_at"]) if account["last_event_at"] else None
+            marks = (equity_at_market(conn, valued_at, self.config.max_quote_age_seconds)
+                     if valued_at else {"equity_at_market_cents": None, "market_value_cents": None,
+                                        "unvaluable_count": 0, "unvaluable_positions": []})
         groups = {}
         seen = set()
         for p in predictions:
@@ -411,13 +448,20 @@ class PaperBroker:
                 continue
             group = groups.setdefault((p["model_name"], p["model_version"]), [])
             outcome = int(p["result"] == "yes")
-            group.append(((p["yes_probability"]-outcome)**2, (p["market_yes_probability"]-outcome)**2))
+            group.append({"event_key": p["event_key"],
+                          "model_brier": (p["yes_probability"]-outcome)**2,
+                          "market_brier": (p["market_yes_probability"]-outcome)**2})
         scores = []
         for (name, version), pairs in groups.items():
-            model = sum(p[0] for p in pairs)/len(pairs)
-            market = sum(p[1] for p in pairs)/len(pairs)
+            # Per-market figures are kept unchanged for continuity. They treat every
+            # bracket as an independent observation, which overstates precision when
+            # one event is offered as many brackets; the clustered block beside them
+            # is the honest reading.
+            model = sum(p["model_brier"] for p in pairs)/len(pairs)
+            market = sum(p["market_brier"] for p in pairs)/len(pairs)
             scores.append({"model_name": name, "model_version": version, "n_markets": len(pairs),
-                           "model_brier": model, "market_brier": market, "brier_improvement": market-model})
+                           "model_brier": model, "market_brier": market, "brier_improvement": market-model,
+                           "event_clustered": _clustered_scores(pairs)})
         realized = sum(s["pnl_cents"] for s in settlements)
         return {"mode": "paper", "run_kind": self.config.run_kind, "config": self.config.to_dict(),
                 **balances, "realized_pnl_cents": realized,
@@ -425,5 +469,9 @@ class PaperBroker:
                 "fees_paid_cents": sum(f["fee_cents"] for f in fills),
                 "halted": bool(account["halted"]), "last_event_at": account["last_event_at"],
                 "orders": orders, "fills": fills, "settlements": settlements,
+                "equity_at_market_cents": marks["equity_at_market_cents"],
+                "market_value_cents": marks["market_value_cents"],
+                "unvaluable_position_count": marks["unvaluable_count"],
+                "unvaluable_positions": marks["unvaluable_positions"],
                 "prediction_count": len(predictions), "scores": scores,
-                "evidence_note": "Synthetic/replay results are not prospective evidence. Forward mode checks arrival time, not model provenance. Brier scores use the first forecast per model/version/market; correlated markets are not independent. Equity is at cost, not liquidation value."}
+                "evidence_note": "Synthetic/replay results are not prospective evidence. Forward mode checks arrival time, not model provenance. Brier scores use the first forecast per model/version/market. Top-level model_brier/market_brier/brier_improvement count every bracket as one observation and therefore overstate precision; read scores[].event_clustered, which weights each event once and reports a confidence interval from resampling whole events. equity_at_cost_cents is at cost; equity_at_market_cents values open positions at the complementary-side ask and excludes positions whose quote is stale or missing, counted in unvaluable_position_count."}

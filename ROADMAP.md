@@ -20,8 +20,9 @@ the evaluator follow the paper milestone. See [AUDIT.md](AUDIT.md) for details.
 - [x] Offline examples, setup/input documentation, and adversarial regression tests.
 - [ ] Smoke-test actual available markets with reviewed watchlist and settlement rules.
 - [ ] Collect prospective forecasts and outcomes; calibrate uncertainty on archived errors.
-- [ ] Add event-clustered uncertainty estimates and a predeclared evaluation protocol.
-- [ ] Add observation scheduling, data health monitoring, and mark-to-market reporting.
+- [x] Add event-clustered uncertainty estimates and a predeclared evaluation protocol.
+- [x] Add data health monitoring and mark-to-market reporting.
+- [ ] Add observation scheduling (health monitoring and mark-to-market are done; scheduling is not).
 
 See [README.md](README.md) for runnable paper commands. This milestone does not
 establish a measured edge or authorize real-money trading.
