@@ -315,7 +315,10 @@ class PaperBroker:
         if reason in {"market_type_disabled", "market_unavailable", "stale_quote"}:
             baseline = None
         result = {"status": "skipped", "reason": reason or "missing_two_sided_quote"}
-        if not reason and baseline is not None:
+        if self.config.research_only:
+            # Record the forecast and the market's price; never size a position.
+            result = {"status": "skipped", "reason": "research_only"}
+        elif not reason and baseline is not None:
             options = []
             for side, prob, asks in (("yes", p, yes), ("no", 1-p, no)):
                 limit = asks[0][0] + self.config.slippage_cents

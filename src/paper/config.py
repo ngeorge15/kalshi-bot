@@ -20,6 +20,12 @@ class PaperConfig:
     max_contracts_per_order: int = 25
     kelly_fraction: float = 0.25
     min_edge: float = 0.05  # after assumed costs
+    # Research mode records model probability, market probability and outcome
+    # without ever sizing or placing a paper order. It exists because proving
+    # predictive edge needs those three values, and none of them require the
+    # market to be tradeable by the operator -- reading a public book is not
+    # trading. Eligibility is still recorded, just not used to skip collection.
+    research_only: bool = False
     run_kind: str = "replay"
     allowed_market_types: tuple[str, ...] = ("temperature", "precipitation")
 
@@ -40,6 +46,8 @@ class PaperConfig:
                 raise ValueError(f"{name} must be in (0, 1]")
         if isinstance(self.weather_sigma_f, bool) or not math.isfinite(self.weather_sigma_f) or self.weather_sigma_f <= 0:
             raise ValueError("weather_sigma_f must be finite and positive")
+        if type(self.research_only) is not bool:
+            raise ValueError("research_only must be a bool")
         if self.run_kind not in {"synthetic", "replay", "forward"}:
             raise ValueError("run_kind must be synthetic, replay, or forward")
         if not self.allowed_market_types or any(

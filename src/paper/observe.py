@@ -86,14 +86,20 @@ def observe_once(broker: PaperBroker, watchlist: list[dict], reader=None, clock=
                 ticker = label(ticker, "ticker")
                 now = clock()
                 eligibility = entry["eligibility"]
-                if (eligibility.get("available") is not True
-                    or not utc(eligibility["checked_at"]) <= now < utc(eligibility["expires_at"])):
+                ineligible = (eligibility.get("available") is not True
+                              or not utc(eligibility["checked_at"]) <= now < utc(eligibility["expires_at"]))
+                # Research mode reads and records regardless of tradeability: a
+                # model probability, a public market probability and a reported
+                # outcome are all obtainable without permission to trade. Trading
+                # modes still refuse, because visible does not mean tradeable.
+                if ineligible and not broker.config.research_only:
                     if broker.market_state(ticker):
                         broker.process({"event_id": str(uuid4()), "type": "unavailable", "at": now.isoformat(),
                                         "ticker": ticker, "reason": "eligibility_missing_or_expired"})
                     results.append({"ticker": ticker, "status": "skipped", "reason": "eligibility_missing_or_expired"})
                     continue
-                label(eligibility.get("source"), "eligibility source")
+                if not broker.config.research_only:
+                    label(eligibility.get("source"), "eligibility source")
                 label(entry.get("rules_source"), "reviewed contract rules source")
                 if entry["market_type"] != "temperature" or entry["market_type"] not in broker.config.allowed_market_types:
                     raise ValueError("Automatic observation currently supports enabled temperature markets only")
@@ -116,7 +122,7 @@ def observe_once(broker: PaperBroker, watchlist: list[dict], reader=None, clock=
                 observed = clock()
                 book = reader.get(url + "/orderbook")
                 received = clock()
-                if received >= utc(eligibility["expires_at"]):
+                if received >= utc(eligibility["expires_at"]) and not broker.config.research_only:
                     if state:
                         broker.process({"event_id": str(uuid4()), "type": "unavailable", "at": received.isoformat(),
                                         "ticker": ticker, "reason": "eligibility_expired_during_fetch"})
@@ -128,7 +134,7 @@ def observe_once(broker: PaperBroker, watchlist: list[dict], reader=None, clock=
                     "available": market["status"] in {"active", "open"}, "weather_spec": spec,
                     "eligibility": eligibility, "rules_source": entry["rules_source"],
                     "source_market": market, "source_orderbook": book, **asks_from_orderbook(book)})
-                result = {"ticker": ticker, **result}
+                result = {"ticker": ticker, "tradeable": not ineligible, **result}
                 results.append(result)
                 if market["status"] not in {"active", "open"} or received >= utc(market["close_time"]):
                     continue
