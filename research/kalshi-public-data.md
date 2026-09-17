@@ -14,6 +14,13 @@ unverified alias, not a replacement for `KALSHI_MARKET_BASE` in `src/paper/venue
 > needs an empirical check that TWC-settled results agree with CLI values before reusing a
 > CLI-trained model. The `"finalized"` status bug is fixed in `src/paper/venue.py`
 > (`KALSHI_SETTLED_STATUSES`); `"determined"` is intentionally not treated as settled.
+>
+> **Settlement-source agreement check (2026-09-17).** For all 30 KXHIGHNY events from
+> 2026-08-16 to 2026-09-14 — every one settled by The Weather Company — the bracket that
+> resolved YES contains that day's NWS CLI maximum. Agreement is 30/30, so a model fitted
+> against CLI observations stays usable on Weather-Company-settled markets. Caveat: brackets
+> are 2 degrees wide, so a sub-degree systematic difference between the two sources would not
+> show up in this test, and only NYC was checked.
 
 ## TL;DR — biggest actionable findings
 
