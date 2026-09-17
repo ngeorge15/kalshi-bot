@@ -449,6 +449,35 @@ def fetch_cli_daily_highs(
 
 # --- 3. Pure dataset assembly ---------------------------------------------------
 
+# The NBM archive's first weeks are unreliable: besides the constant 0 C fill
+# below, November 2024 carries multi-hour plateaus near 72 F that appear
+# simultaneously at stations a thousand miles apart, which is not weather.
+# 52 of the 83 plateau days in the whole record fall in that month. Data from
+# December 2024 onward looks physically ordinary, so that is where usable
+# history starts.
+NBM_ARCHIVE_USABLE_START = date(2024, 12, 1)
+
+
+# A constant run this long is a fill value rather than weather; shorter runs
+# (a single hour, a partial window) are ordinary and must not be flagged.
+MIN_DEGENERATE_RUN = 12
+
+
+def is_degenerate_series(values: list[float | None]) -> bool:
+    """True if a day-length series is entirely present and identical -- a fill value, not a forecast.
+
+    Open-Meteo returns a constant 0 C (32 F) for a lead its archive does not
+    actually cover: the first ~48h of the NBM record report `previous_day2`
+    as exactly 32.0 F for every hour, including Miami in November. A real
+    hourly forecast never repeats one value across 24 consecutive hours, so a
+    constant day is treated as missing rather than fitted against.
+    """
+    if len(values) < MIN_DEGENERATE_RUN:
+        return False
+    present = [v for v in values if _finite(v)]
+    return len(present) == len(values) and len(set(present)) == 1
+
+
 def build_daily_dataset(
     station_code: str,
     forecasts: list[dict],
@@ -507,8 +536,10 @@ def build_daily_dataset(
         hourly_lead1 = [lead1_by_valid.get(h) for h in needed]
         hourly_lead2 = [lead2_by_valid.get(h) for h in needed]
 
-        lead1_complete = all(_finite(v) for v in hourly_lead1)
-        lead2_complete = all(_finite(v) for v in hourly_lead2)
+        lead1_degenerate = is_degenerate_series(hourly_lead1)
+        lead2_degenerate = is_degenerate_series(hourly_lead2)
+        lead1_complete = all(_finite(v) for v in hourly_lead1) and not lead1_degenerate
+        lead2_complete = all(_finite(v) for v in hourly_lead2) and not lead2_degenerate
 
         forecast_max_lead1 = max(hourly_lead1) if lead1_complete else None
         forecast_max_lead2 = max(hourly_lead2) if lead2_complete else None
@@ -517,10 +548,14 @@ def build_daily_dataset(
         observed_max = cli_row["max_f"] if cli_row is not None else None
 
         reasons = []
-        if not lead1_complete:
+        if lead1_degenerate:
+            reasons.append(f"lead1 constant {hourly_lead1[0]}F for all 24 hours (fill value, not a forecast)")
+        elif not lead1_complete:
             missing = sum(1 for v in hourly_lead1 if not _finite(v))
             reasons.append(f"lead1 missing {missing}/24 hours")
-        if not lead2_complete:
+        if lead2_degenerate:
+            reasons.append(f"lead2 constant {hourly_lead2[0]}F for all 24 hours (fill value, not a forecast)")
+        elif not lead2_complete:
             missing = sum(1 for v in hourly_lead2 if not _finite(v))
             reasons.append(f"lead2 missing {missing}/24 hours")
         if cli_row is None:

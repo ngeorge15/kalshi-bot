@@ -72,7 +72,8 @@ from src.data.kalshi_history import (
     STATION_STANDARD_UTC_OFFSET_HOURS,
     fetch_event_at_decision,
 )
-from src.data.weather.archive import fetch_cli_daily_highs, fetch_nbm_previous_runs
+from src.data.weather.archive import (NBM_ARCHIVE_USABLE_START, fetch_cli_daily_highs,
+                                      fetch_nbm_previous_runs, is_degenerate_series)
 from src.paper import protocol as protocol_mod
 from src.paper.fees import trading_fee_cents
 from src.paper.uncertainty import (
@@ -227,20 +228,29 @@ def select_forecast_values(
     """
     if variant not in VARIANTS:
         raise ValueError(f"Unknown variant {variant!r}; expected one of {VARIANTS}")
+    # Open-Meteo reports a lead its archive does not cover as a constant 0 C
+    # (32 F) every hour rather than as null. Such a day is a fill value, not a
+    # forecast, so that lead is treated as unavailable exactly as a missing
+    # value would be.
+    degenerate = {
+        lead: is_degenerate_series([hourly.get(valid, {}).get(lead) for valid in needed_valid_times])
+        for lead in ("lead1", "lead2")
+    }
     values: list[float] = []
     for valid in needed_valid_times:
         entry = hourly.get(valid, {})
         if variant == "lead2":
-            value = entry.get("lead2")
+            value = None if degenerate["lead2"] else entry.get("lead2")
             if not _finite(value):
                 raise MissingForecastError(f"lead2 missing for hour {valid.isoformat()}")
             values.append(value)
             continue
         # lead1_guarded
         lead1_available_at = valid - timedelta(hours=24) + timedelta(hours=latency_hours)
-        value = entry.get("lead1") if lead1_available_at <= decision_time else None
+        timely = lead1_available_at <= decision_time and not degenerate["lead1"]
+        value = entry.get("lead1") if timely else None
         if not _finite(value):
-            value = entry.get("lead2")
+            value = None if degenerate["lead2"] else entry.get("lead2")
         if not _finite(value):
             raise MissingForecastError(
                 f"Neither a timely lead1 nor lead2 is available for hour {valid.isoformat()}"
@@ -501,6 +511,19 @@ def max_drawdown_cents(trades: list[dict]) -> float:
 
 # --- 5. Guardrails: test-period and settlement-source ----------------------------
 
+def _enforce_archive_start(start: date, label: str) -> None:
+    """Refuse a range beginning before the NBM archive is trustworthy.
+
+    See `NBM_ARCHIVE_USABLE_START`: the archive's first month carries fill
+    values and implausible plateaus, which would otherwise be fitted against
+    or traded on as if they were forecasts.
+    """
+    if start < NBM_ARCHIVE_USABLE_START:
+        raise ValueError(
+            f"{label} starts {start}, before the usable NBM archive "
+            f"({NBM_ARCHIVE_USABLE_START}); its first month contains fill values and plateau artifacts")
+
+
 def _enforce_period_guards(
     eval_end: date,
     protocol_path: str | Path | None,
@@ -607,6 +630,8 @@ def run_backtest(
     eval_start_d, eval_end_d = _as_date(eval_start), _as_date(eval_end)
     if eval_start_d > eval_end_d:
         raise ValueError(f"eval_start {eval_start_d} must be on or before eval_end {eval_end_d}")
+    _enforce_archive_start(eval_start_d, "eval range")
+    _enforce_archive_start(_as_date(train_start), "train range")
     verified_protocol = _enforce_period_guards(eval_end_d, protocol_path, allow_weather_company_settlement)
 
     fits = fit_bias_sigma(station_codes, variant, train_start, train_end, eval_start_d, eval_end_d, session=session)

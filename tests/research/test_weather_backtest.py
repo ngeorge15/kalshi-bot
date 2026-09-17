@@ -90,7 +90,7 @@ class TestForecastMaxForDay:
             rows = []
             for h in range(24):
                 valid = start + timedelta(hours=h)
-                rows.append({"valid_utc": valid.isoformat().replace("+00:00", "Z"), "lead1_f": 50.0 + h, "lead2_f": 10.0})
+                rows.append({"valid_utc": valid.isoformat().replace("+00:00", "Z"), "lead1_f": 50.0 + h, "lead2_f": 10.0 - h * 0.1})
             return rows
 
         monkeypatch.setattr(wb, "fetch_nbm_previous_runs", fake_fetch)
@@ -109,7 +109,7 @@ class TestForecastMaxForDay:
             for h in range(24):
                 valid = start + timedelta(hours=h)
                 # lead1 rises through the day; lead2 constant and lower.
-                rows.append({"valid_utc": valid.isoformat().replace("+00:00", "Z"), "lead1_f": 50.0 + h, "lead2_f": 5.0})
+                rows.append({"valid_utc": valid.isoformat().replace("+00:00", "Z"), "lead1_f": 50.0 + h, "lead2_f": 5.0 - h * 0.1})
             return rows
 
         monkeypatch.setattr(wb, "fetch_nbm_previous_runs", fake_fetch)
@@ -142,7 +142,7 @@ class TestFitBiasSigma:
                 start = wb._local_day_start(d, offset)
                 for h in range(24):
                     valid = start + timedelta(hours=h)
-                    rows.append({"valid_utc": valid.isoformat().replace("+00:00", "Z"), "lead1_f": value, "lead2_f": value})
+                    rows.append({"valid_utc": valid.isoformat().replace("+00:00", "Z"), "lead1_f": value - h * 0.01, "lead2_f": value - h * 0.01})
                 d += timedelta(days=1)
             return rows
 
@@ -485,8 +485,8 @@ class TestRunFetchPrices:
 class TestRunBacktestEndToEnd:
     STATION = "KNYC"
     SERIES = "KXHIGHNY"
-    TRAIN_START = date(2024, 11, 1)
-    TRAIN_END = date(2024, 11, 2)
+    TRAIN_START = date(2024, 12, 1)
+    TRAIN_END = date(2024, 12, 2)
     EVAL_DATE = date(2025, 1, 1)
 
     def _patch_forecast(self, monkeypatch, value=70.0):
@@ -498,7 +498,7 @@ class TestRunBacktestEndToEnd:
                 start = wb._local_day_start(d, offset)
                 for h in range(24):
                     valid = start + timedelta(hours=h)
-                    rows.append({"valid_utc": valid.isoformat().replace("+00:00", "Z"), "lead1_f": value, "lead2_f": value})
+                    rows.append({"valid_utc": valid.isoformat().replace("+00:00", "Z"), "lead1_f": value - h * 0.01, "lead2_f": value - h * 0.01})
                 d += timedelta(days=1)
             return rows
 
@@ -508,8 +508,8 @@ class TestRunBacktestEndToEnd:
         monkeypatch.setattr(
             wb, "fetch_cli_daily_highs",
             lambda station, start, end, session=None: [
-                {"date_lst": "2024-11-01", "max_f": 69.0, "source": "x"},
-                {"date_lst": "2024-11-02", "max_f": 71.0, "source": "x"},
+                {"date_lst": "2024-12-01", "max_f": 69.0, "source": "x"},
+                {"date_lst": "2024-12-02", "max_f": 71.0, "source": "x"},
             ],
         )
 
@@ -651,3 +651,46 @@ class TestRunBacktestEndToEnd:
                 eval_end=wb.TRAIN_END + timedelta(days=1),
                 min_edge=0.05,
             )
+
+
+class TestDegenerateLeadIsNotTraded:
+    """A constant fill-value lead must never reach a trade."""
+
+    def _day(self, lead1, lead2):
+        start = wb._local_day_start(date(2025, 6, 15), -5)
+        needed = [start + timedelta(hours=h) for h in range(24)]
+        hourly = {v: {"lead1": lead1(i), "lead2": lead2(i)} for i, v in enumerate(needed)}
+        return hourly, needed, start - timedelta(minutes=1)
+
+    def test_lead2_variant_refuses_a_constant_lead2(self):
+        hourly, needed, decision = self._day(lambda i: 70.0 + i * 0.1, lambda i: 32.0)
+        with pytest.raises(wb.MissingForecastError):
+            wb.select_forecast_values("lead2", hourly, needed, decision)
+
+    def test_guarded_variant_does_not_fall_back_to_a_constant_lead2(self):
+        # lead1 is not yet published for the day's last hours, and the lead2
+        # that would otherwise cover them is a fill value.
+        hourly, needed, decision = self._day(lambda i: 70.0 + i * 0.1, lambda i: 32.0)
+        for valid in needed[-2:]:
+            hourly[valid]["lead1"] = None
+        with pytest.raises(wb.MissingForecastError):
+            wb.select_forecast_values("lead1_guarded", hourly, needed, decision)
+
+    def test_a_varying_lead2_is_still_usable(self):
+        hourly, needed, decision = self._day(lambda i: 70.0 + i * 0.1, lambda i: 60.0 + i * 0.1)
+        values = wb.select_forecast_values("lead2", hourly, needed, decision)
+        assert max(values) == pytest.approx(62.3)
+
+
+class TestArchiveStartGuard:
+    """The NBM archive's first month is not usable data."""
+
+    def test_train_range_before_the_usable_archive_is_refused(self):
+        with pytest.raises(ValueError, match="before the usable NBM archive"):
+            wb.run_backtest(["KNYC"], "lead1_guarded", "2024-11-01", "2025-06-30",
+                            "2025-07-01", "2025-12-31", 0.05)
+
+    def test_eval_range_before_the_usable_archive_is_refused(self):
+        with pytest.raises(ValueError, match="before the usable NBM archive"):
+            wb.run_backtest(["KNYC"], "lead1_guarded", "2024-12-01", "2024-12-15",
+                            "2024-11-05", "2024-11-20", 0.05)

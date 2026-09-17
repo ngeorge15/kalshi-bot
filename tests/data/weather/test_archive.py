@@ -574,3 +574,41 @@ def test_run_summarize_reads_jsonl(tmp_path):
     input_path.write_text(json.dumps(_row("KNYC", "2025-01-01", 50.0, 52.0)) + "\n")
     summary = archive.run_summarize(str(input_path), "2025-12-31")
     assert summary["train"]["KNYC"]["lead1"]["n"] == 1
+
+
+class TestDegenerateSeries:
+    """Open-Meteo reports an uncovered lead as a constant 0 C, not as null."""
+
+    def test_day_length_constant_series_is_degenerate(self):
+        assert archive.is_degenerate_series([32.0] * 24) is True
+
+    def test_varying_series_is_not(self):
+        assert archive.is_degenerate_series([32.0] * 23 + [33.0]) is False
+
+    def test_short_constant_run_is_not_flagged(self):
+        # A single hour, or a partial window, is ordinary.
+        assert archive.is_degenerate_series([32.0]) is False
+        assert archive.is_degenerate_series([32.0] * 3) is False
+
+    def test_series_with_a_missing_value_is_not_degenerate(self):
+        # That is ordinary incompleteness, reported by its own reason.
+        assert archive.is_degenerate_series([32.0] * 23 + [None]) is False
+
+    def test_constant_lead_marks_the_day_incomplete_with_a_named_reason(self):
+        # Observed live: KMIA 2024-11-20 had lead2 = 32.0 F for all 24 hours
+        # while lead1 forecast the low 80s and the day reached 85 F.
+        offset = -5
+        start = archive._local_day_start(date(2024, 11, 20), offset)
+        forecasts = [
+            {"valid_utc": archive._format_utc(start + timedelta(hours=h)),
+             "lead1_f": 80.0 + h * 0.1, "lead2_f": 32.0}
+            for h in range(24)
+        ]
+        cli = [{"date_lst": "2024-11-20", "max_f": 85.0, "source": "test"}]
+        rows = archive.build_daily_dataset("KMIA", forecasts, cli, offset)
+        row = next(r for r in rows if r["date_lst"] == "2024-11-20")
+        assert row["complete"] is False
+        assert row["forecast_max_lead2_f"] is None
+        assert "constant" in row["reason"] and "fill value" in row["reason"]
+        # The usable lead is unaffected.
+        assert row["forecast_max_lead1_f"] == pytest.approx(82.3)
