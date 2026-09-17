@@ -143,8 +143,14 @@ and fractional quantities down. No event sends money to an exchange.
 - Consumed depth is persisted. An unchanged snapshot does not replenish it; visible
   quantity increases and newly observed levels can. This conservative approximation
   may underfill and cannot reconstruct exchange queue position or hidden liquidity.
-- Default simulated cost is 2 cents per contract plus 1 cent adverse slippage.
-  These are adjustable experiment assumptions, **not** Kalshi's current fee tariff.
+- Default simulated cost is 2 cents per contract plus 1 cent adverse slippage
+  (`fee_model: "flat"`). These are adjustable experiment assumptions, **not**
+  Kalshi's current fee tariff. Set `fee_model: "kalshi"` (with `fee_type` and
+  `fee_multiplier` from the series' public API record, e.g. `quadratic`/`1`
+  for weather series) to charge Kalshi's real price-dependent quadratic fee
+  instead; see `src/paper/fees.py` and `research/kalshi-fees.md`. Every paper
+  fill consumes observed ask depth, which is a taker action, so the kalshi
+  model always charges the taker rate.
 - Cash and exposure include pending reservations and filled cost. Daily loss limits
   use realized settlement P&L; reported equity is at cost, not mark-to-market or
   liquidation value. There is no automatic halt reset.

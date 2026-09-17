@@ -306,6 +306,60 @@ def test_cli_reports_errors_and_wont_overwrite_database(tmp_path, capsys):
     assert json.loads(open(output).read())["mode"] == "paper"
 
 
+def test_flat_fee_model_is_the_default_and_unchanged():
+    assert PaperConfig().fee_model == "flat"
+
+
+def test_kalshi_fee_model_charges_the_price_dependent_formula(tmp_path):
+    from src.paper.fees import trading_fee_cents
+
+    config = PaperConfig(fee_model="kalshi", fee_type="quadratic", fee_multiplier=1)
+    broker = PaperBroker(str(tmp_path / "kalshi_fees.db"), config)
+    broker.process(quote())
+    broker.process(order())  # side=yes, limit_cents=46, quantity=10
+    result = broker.process(quote("q2", 2, yes_asks=[[44, 3], [45, 5]]))
+    fills = result["fills"]
+    # Fill prices are ask + slippage_cents (1): 44->45 (count 3), 45->46 (count 5).
+    assert [(f["price_cents"], f["quantity"]) for f in fills] == [(45, 3), (46, 5)]
+    expected = [trading_fee_cents(45, 3, fee_type="quadratic", fee_multiplier=1, is_maker=False),
+                trading_fee_cents(46, 5, fee_type="quadratic", fee_multiplier=1, is_maker=False)]
+    assert [f["fee_cents"] for f in fills] == expected
+    # Neither price-dependent fee equals what the flat 2c/contract model would have charged,
+    # proving the kalshi model is actually wired in rather than silently falling back.
+    assert expected != [3 * 2, 5 * 2]
+    report = broker.report()
+    assert report["fees_paid_cents"] == sum(expected)
+    assert report["cash_cents"] == 100_000 - (45 * 3 + expected[0]) - (46 * 5 + expected[1])
+    assert report["config"]["fee_model"] == "kalshi"
+
+
+def test_kalshi_fee_model_reserves_the_real_fee_before_any_fill(tmp_path):
+    from src.paper.fees import trading_fee_cents
+
+    config = PaperConfig(fee_model="kalshi", fee_type="quadratic", fee_multiplier=1)
+    broker = PaperBroker(str(tmp_path / "kalshi_reserve.db"), config)
+    broker.process(quote())
+    broker.process(order())  # limit_cents=46, quantity=10, unfilled (resting)
+    # Worst case: each contract filled separately and rounded up individually.
+    fee = 10 * trading_fee_cents(46, 1, fee_type="quadratic", fee_multiplier=1, is_maker=False)
+    assert broker.report()["reserved_cents"] == 46 * 10 + fee
+
+
+def test_kalshi_fee_reserve_bounds_every_possible_fill(tmp_path):
+    # A limit above 50 can fill lower, where the quadratic fee is larger; the
+    # reservation must cover any fill price at or below the limit and any split.
+    from src.paper.fees import trading_fee_cents
+
+    broker = PaperBroker(str(tmp_path / "bound.db"), PaperConfig(fee_model="kalshi"))
+    def fee(price, count):
+        return trading_fee_cents(price, count, fee_type="quadratic", fee_multiplier=1, is_maker=False)
+    for limit in range(1, 100):
+        for count in (1, 3, 10, 100):
+            reserve = broker._fee_reserve_cents(limit, count)
+            for price in range(1, limit + 1):
+                assert reserve >= count * fee(price, 1) >= fee(price, count)
+
+
 def test_no_network_or_credentials_needed(tmp_path, monkeypatch):
     import socket
     def fail(*args, **kwargs):

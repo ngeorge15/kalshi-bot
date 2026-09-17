@@ -13,6 +13,7 @@ from typing import Callable, Iterator
 
 from src.paper.config import PaperConfig
 from src.paper.events import cluster_summary, degenerate_clustering
+from src.paper.fees import trading_fee_cents
 from src.paper.uncertainty import cluster_bootstrap_ci, paired_brier_by_event
 
 
@@ -148,6 +149,35 @@ class PaperBroker:
             WHERE remaining>0 AND ticker IN
             (SELECT ticker FROM paper_markets WHERE close_at<=?)""", (now.isoformat(),))
 
+    def _fee_cents(self, price_cents: int, count: int) -> int:
+        """Fee charged for `count` contracts at `price_cents`, per the configured model.
+
+        A paper order rests in ``paper_orders`` until a later quote's ask
+        depth fills it (see the module docstring), but the fill itself
+        consumes that ask depth outright -- it does not add liquidity and
+        wait to be crossed by someone else. Consuming resting depth is a
+        taker action on a real exchange regardless of when it happens in
+        wall-clock time, so every paper fill is charged the taker rate
+        (``is_maker=False``); this is also the conservative (higher-fee)
+        choice on any series that carries a maker discount.
+        """
+        if self.config.fee_model == "flat":
+            return count * self.config.fee_per_contract_cents
+        return trading_fee_cents(price_cents, count, fee_type=self.config.fee_type,
+                                  fee_multiplier=self.config.fee_multiplier, is_maker=False)
+
+    def _fee_reserve_cents(self, limit_cents: int, count: int) -> int:
+        """Upper bound on the fees an order at `limit_cents` can incur across its fills.
+
+        A fill may execute at any price up to the limit, and the quadratic fee
+        peaks at 50 cents, so a 70-cent limit filling at 50 pays more than a fee
+        priced at the limit. Fills are also rounded up individually, so the
+        bound charges each contract its own rounded fee at the worst price.
+        """
+        if self.config.fee_model == "flat":
+            return count * self.config.fee_per_contract_cents
+        return count * self._fee_cents(min(limit_cents, 50), 1)
+
     def _market(self, conn: sqlite3.Connection, ticker: str) -> sqlite3.Row:
         row = conn.execute("SELECT * FROM paper_markets WHERE ticker=?", (ticker,)).fetchone()
         if row is None:
@@ -222,7 +252,7 @@ class PaperBroker:
                 if price > order["limit_cents"] or not level[1] or not remaining:
                     continue
                 count = min(level[1], remaining)
-                fee = count * self.config.fee_per_contract_cents
+                fee = self._fee_cents(price, count)
                 conn.execute("""INSERT INTO paper_fills(order_id, quote_id, price_cents, quantity, fee_cents, filled_at)
                     VALUES(?, ?, ?, ?, ?, ?)""", (order["order_id"], event["event_id"], price, count, fee, now.isoformat()))
                 conn.execute("UPDATE paper_account SET cash_cents=cash_cents-? WHERE id=1", (price * count + fee,))
@@ -237,8 +267,9 @@ class PaperBroker:
 
     def _balances(self, conn: sqlite3.Connection) -> dict:
         cash = conn.execute("SELECT cash_cents FROM paper_account WHERE id=1").fetchone()[0]
-        reserved = conn.execute("SELECT COALESCE(SUM(remaining*(limit_cents+?)),0) FROM paper_orders",
-                                (self.config.fee_per_contract_cents,)).fetchone()[0]
+        resting = conn.execute("SELECT limit_cents, remaining FROM paper_orders WHERE remaining>0").fetchall()
+        reserved = sum(row["remaining"] * row["limit_cents"] + self._fee_reserve_cents(row["limit_cents"], row["remaining"])
+                       for row in resting)
         cost = conn.execute("""SELECT COALESCE(SUM(f.price_cents*f.quantity+f.fee_cents),0)
             FROM paper_fills f JOIN paper_orders o USING(order_id)
             JOIN paper_markets m USING(ticker) WHERE m.result IS NULL""").fetchone()[0]
@@ -269,7 +300,7 @@ class PaperBroker:
         if quantity > self.config.max_contracts_per_order:
             return "per_order_limit"
         balances = self._balances(conn)
-        reserve = quantity * (price + self.config.fee_per_contract_cents)
+        reserve = quantity * price + self._fee_reserve_cents(price, quantity)
         if reserve > balances["available_cash_cents"]:
             return "insufficient_cash"
         if reserve + balances["reserved_cents"] + balances["open_cost_cents"] > self.config.max_exposure_cents:
@@ -322,7 +353,7 @@ class PaperBroker:
             options = []
             for side, prob, asks in (("yes", p, yes), ("no", 1-p, no)):
                 limit = asks[0][0] + self.config.slippage_cents
-                cost = limit + self.config.fee_per_contract_cents
+                cost = limit + self._fee_cents(limit, 1)
                 edge = prob - cost / 100
                 if limit <= 99 and cost < 100 and edge >= self.config.min_edge:
                     options.append((edge, side, limit, cost))

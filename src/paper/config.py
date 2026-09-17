@@ -2,6 +2,8 @@
 from dataclasses import asdict, dataclass
 import math
 
+from src.paper.fees import KNOWN_FEE_TYPES
+
 
 @dataclass(frozen=True)
 class PaperConfig:
@@ -9,6 +11,13 @@ class PaperConfig:
 
     initial_cash_cents: int = 100_000
     fee_per_contract_cents: int = 2
+    # "flat" (default) charges fee_per_contract_cents per contract, matching every
+    # experiment run before this field existed. "kalshi" instead charges Kalshi's
+    # real price-dependent quadratic formula (src/paper/fees.py) using fee_type
+    # and fee_multiplier below, both read from the series' public API record.
+    fee_model: str = "flat"
+    fee_type: str = "quadratic"
+    fee_multiplier: float = 1.0
     slippage_cents: int = 1
     max_quote_age_seconds: int = 60
     max_forecast_age_seconds: int = 21_600
@@ -46,6 +55,13 @@ class PaperConfig:
                 raise ValueError(f"{name} must be in (0, 1]")
         if isinstance(self.weather_sigma_f, bool) or not math.isfinite(self.weather_sigma_f) or self.weather_sigma_f <= 0:
             raise ValueError("weather_sigma_f must be finite and positive")
+        if self.fee_model not in {"flat", "kalshi"}:
+            raise ValueError("fee_model must be flat or kalshi")
+        if self.fee_type not in KNOWN_FEE_TYPES:
+            raise ValueError(f"fee_type must be one of {sorted(KNOWN_FEE_TYPES)}")
+        if (isinstance(self.fee_multiplier, bool) or not isinstance(self.fee_multiplier, (int, float))
+                or not math.isfinite(self.fee_multiplier) or self.fee_multiplier <= 0):
+            raise ValueError("fee_multiplier must be finite and positive")
         if type(self.research_only) is not bool:
             raise ValueError("research_only must be a bool")
         if self.run_kind not in {"synthetic", "replay", "forward"}:
