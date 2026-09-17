@@ -533,7 +533,10 @@ def _enforce_period_guards(
             f"eval_end {eval_end} is after TRAIN_END ({TRAIN_END}); evaluating past it requires "
             "a predeclared, verified --protocol. None was given."
         )
-    declared = protocol_mod.load(protocol_path)
+    try:
+        declared = protocol_mod.load(protocol_path)
+    except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"Could not load a protocol from {protocol_path}: {exc}") from exc
     verification = protocol_mod.verify(declared, protocol_path)
     if not verification.valid:
         raise ValueError(f"Protocol at {protocol_path} failed verification: {verification.message}")
