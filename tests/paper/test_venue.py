@@ -130,6 +130,18 @@ class TestKalshiAdapter:
         parsed = KalshiVenue().parse_market(payload)
         assert parsed["is_open"] is False and parsed["result"] == "yes"
 
+    def test_finalized_market_normalises_to_settled(self):
+        # The live API reports a resolved market as "finalized", never "settled".
+        payload = {"market": {"ticker": "T", "status": "finalized", "result": "no",
+                              "close_time": "2026-09-09T00:00:00Z"}}
+        parsed = KalshiVenue().parse_market(payload)
+        assert parsed["status"] == "settled" and parsed["result"] == "no" and parsed["is_open"] is False
+
+    def test_determined_market_is_not_yet_settled(self):
+        payload = {"market": {"ticker": "T", "status": "determined", "result": "yes",
+                              "close_time": "2026-09-09T00:00:00Z"}}
+        assert KalshiVenue().parse_market(payload)["status"] == "determined"
+
     def test_empty_result_string_becomes_none(self):
         payload = {"market": {"ticker": "T", "status": "active", "result": "",
                               "close_time": "2026-09-09T00:00:00Z"}}

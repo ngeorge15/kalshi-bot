@@ -36,6 +36,11 @@ KALSHI_MARKET_BASE = "https://external-api.kalshi.com/trade-api/v2"
 MIN_PRICE_CENTS = 1
 MAX_PRICE_CENTS = 99
 
+# A resolved Kalshi market reports status "finalized"; "settled" is accepted only
+# as a query-filter value and from older payloads. "determined" is deliberately
+# excluded: its result can still change before finalization.
+KALSHI_SETTLED_STATUSES = frozenset({"finalized", "settled"})
+
 
 @runtime_checkable
 class Venue(Protocol):
@@ -106,10 +111,11 @@ class KalshiVenue:
         """
         market = payload["market"]
         status = market["status"]
+        result = market.get("result") or None
         return {
             "ticker": market["ticker"],
-            "status": status,
-            "result": market.get("result") or None,
+            "status": "settled" if status in KALSHI_SETTLED_STATUSES and result else status,
+            "result": result,
             "close_time": market["close_time"],
             "is_open": status in {"active", "open"},
             "raw": market,
