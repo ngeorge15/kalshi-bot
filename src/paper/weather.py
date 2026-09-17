@@ -16,6 +16,24 @@ def _timestamp(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def bracket_probability(mean_high_f: float, sigma_f: float,
+                         lower_bound_f: float | None, upper_bound_f: float | None) -> float:
+    """P(lower_bound_f <= X < upper_bound_f) for X ~ Normal(mean_high_f, sigma_f).
+
+    Either bound may be `None` for an open tail (`lower_bound_f=None` means
+    the interval extends to -inf; `upper_bound_f=None` means it extends to
+    +inf). Pure and unvalidated -- callers are responsible for checking that
+    `sigma_f` is finite and positive and that the bounds are ordered; this
+    exists so both `predict_hourly_high` and other callers (e.g. a backtest
+    fitting its own mean/sigma) share one probability calculation instead of
+    duplicating the CDF-difference logic.
+    """
+    normal = NormalDist(mu=mean_high_f, sigma=sigma_f)
+    upper_cdf = normal.cdf(upper_bound_f) if upper_bound_f is not None else 1.0
+    lower_cdf = normal.cdf(lower_bound_f) if lower_bound_f is not None else 0.0
+    return upper_cdf - lower_cdf
+
+
 def predict_hourly_high(snapshot: dict, spec: dict, now: datetime,
                         sigma_f: float, max_age_seconds: int) -> dict:
     """Estimate P(lower <= high < upper) from a complete hourly forecast day.
@@ -64,8 +82,7 @@ def predict_hourly_high(snapshot: dict, spec: dict, now: datetime,
     if set(temperatures) != needed:
         raise ValueError(f"Incomplete forecast day: {len(temperatures)}/24 hours")
     mean = max(temperatures.values())
-    normal = NormalDist(mu=mean, sigma=sigma_f)
-    probability = (normal.cdf(upper) if upper is not None else 1.0) - (normal.cdf(lower) if lower is not None else 0.0)
+    probability = bracket_probability(mean, sigma_f, lower, upper)
     return {"yes_probability": probability, "mean_high_f": mean, "sigma_f": sigma_f,
             "source": snapshot["source"], "issued_at": issued.isoformat(), "hours": 24,
             "model_name": "weather_hourly_normal_baseline", "model_version": "1",
