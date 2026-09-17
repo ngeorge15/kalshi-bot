@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -320,6 +321,60 @@ def _bounds_from_strike(strike_type: str, floor_strike: object, cap_strike: obje
     return float(floor_strike) + 0.5, None
 
 
+_SUBTITLE_RANGE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*°?\s*to\s*(-?\d+(?:\.\d+)?)\s*°?\s*$", re.IGNORECASE)
+_SUBTITLE_ABOVE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*°?\s*or\s+above\s*$", re.IGNORECASE)
+_SUBTITLE_BELOW = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*°?\s*or\s+below\s*$", re.IGNORECASE)
+
+
+def _bounds_from_subtitle(subtitle: object) -> tuple[float | None, float | None]:
+    """Bounds from a bracket's display subtitle, e.g. "30° to 31°".
+
+    The historical endpoint returns some brackets with `strike_type` and both
+    strike fields null while the subtitle still states the range, so this is
+    the only way to recover those bounds. The subtitle names the inclusive
+    integer degrees a bracket settles on, so "30° to 31°" covers [29.5, 31.5),
+    "36° or above" is [35.5, inf) and "27° or below" is (-inf, 27.5) -- the
+    same half-degree convention the strike fields use.
+
+    Raises:
+        ValueError: If `subtitle` is not one of those three shapes.
+    """
+    text = subtitle if isinstance(subtitle, str) else ""
+    match = _SUBTITLE_RANGE.match(text)
+    if match:
+        return float(match.group(1)) - 0.5, float(match.group(2)) + 0.5
+    match = _SUBTITLE_ABOVE.match(text)
+    if match:
+        return float(match.group(1)) - 0.5, None
+    match = _SUBTITLE_BELOW.match(text)
+    if match:
+        return None, float(match.group(1)) + 0.5
+    raise ValueError(f"Cannot read bracket bounds from subtitle {subtitle!r}")
+
+
+def _market_bounds(raw: dict) -> tuple[float | None, float | None]:
+    """Bounds for one bracket, preferring the strike fields and falling back to the subtitle.
+
+    When both are available they must agree; a disagreement means one of the
+    two is being misread, which would silently mis-score every trade on that
+    bracket, so it raises instead.
+    """
+    subtitle = raw.get("yes_sub_title") or raw.get("subtitle")
+    if raw.get("strike_type") not in _STRIKE_TYPES:
+        return _bounds_from_subtitle(subtitle)
+    bounds = _bounds_from_strike(raw.get("strike_type"), raw.get("floor_strike"), raw.get("cap_strike"))
+    if isinstance(subtitle, str) and subtitle.strip():
+        try:
+            from_subtitle = _bounds_from_subtitle(subtitle)
+        except ValueError:
+            return bounds
+        if from_subtitle != bounds:
+            raise ValueError(
+                f"Bracket {raw.get('ticker')!r} bounds disagree: strike fields give {bounds}, "
+                f"subtitle {subtitle!r} gives {from_subtitle}")
+    return bounds
+
+
 def _settlement_source(rules_primary: object) -> str:
     """Classify a market's settlement source from its `rules_primary` text."""
     text = rules_primary if isinstance(rules_primary, str) else ""
@@ -340,12 +395,13 @@ def parse_market(raw: dict, series: str) -> dict:
         `close_time` (ISO 8601, verbatim from the API).
 
     Raises:
-        ValueError: If `strike_type`/bound fields are missing or malformed.
+        ValueError: If neither the strike fields nor the subtitle yield
+            bounds, or if the two disagree.
     """
     event_ticker = raw["event_ticker"]
     station = _station_for_series(series)
     date_lst = _parse_event_ticker_date(event_ticker, series).isoformat()
-    lower, upper = _bounds_from_strike(raw.get("strike_type"), raw.get("floor_strike"), raw.get("cap_strike"))
+    lower, upper = _market_bounds(raw)
     result = raw.get("result")
     result = result if result in ("yes", "no") else None
     return {

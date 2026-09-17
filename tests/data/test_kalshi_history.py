@@ -578,3 +578,36 @@ class TestFetchEventAtDecision:
         assert row["price"].status == "ok"
         assert row["price"].yes_bid_cents == 33
         assert row["decision_time_utc"] == kh._format_utc(decision_time)
+
+
+class TestBoundsFallbackToSubtitle:
+    """The historical endpoint returns some brackets with null strike fields."""
+
+    def test_null_strike_type_falls_back_to_subtitle(self):
+        # Observed live: KXHIGHNY-25JAN16-B30.5 came back with strike_type,
+        # floor_strike and cap_strike all null, subtitle "30° to 31°".
+        raw = {"ticker": "KXHIGHNY-25JAN16-B30.5", "strike_type": None, "floor_strike": None,
+               "cap_strike": None, "yes_sub_title": "30° to 31°"}
+        assert kh._market_bounds(raw) == (29.5, 31.5)
+
+    def test_subtitle_open_tails(self):
+        above = {"ticker": "T35", "strike_type": None, "yes_sub_title": "36° or above"}
+        below = {"ticker": "T28", "strike_type": None, "yes_sub_title": "27° or below"}
+        assert kh._market_bounds(above) == (35.5, None)
+        assert kh._market_bounds(below) == (None, 27.5)
+
+    def test_strike_fields_win_and_must_agree_with_subtitle(self):
+        agreeing = {"ticker": "B34.5", "strike_type": "between", "floor_strike": 34,
+                    "cap_strike": 35, "yes_sub_title": "34° to 35°"}
+        assert kh._market_bounds(agreeing) == (33.5, 35.5)
+        disagreeing = dict(agreeing, yes_sub_title="40° to 41°")
+        with pytest.raises(ValueError, match="disagree"):
+            kh._market_bounds(disagreeing)
+
+    def test_unreadable_subtitle_without_strike_type_raises(self):
+        with pytest.raises(ValueError, match="Cannot read bracket bounds"):
+            kh._market_bounds({"ticker": "X", "strike_type": None, "yes_sub_title": "warm"})
+
+    def test_unreadable_subtitle_is_ignored_when_strikes_are_present(self):
+        raw = {"ticker": "T35", "strike_type": "greater", "floor_strike": 35, "yes_sub_title": "toasty"}
+        assert kh._market_bounds(raw) == (35.5, None)
