@@ -69,6 +69,32 @@ continuous Fahrenheit bounds must match the contract's settlement/rounding rules
 the code does not infer those rules from a title. Same-day forecasts and observed
 highs-so-far are not implemented.
 
+### Authoring a watchlist
+
+`scaffold`/`validate`/`explain` are offline authoring tools: they never make a
+network call, never touch the experiment database, and work without `init`.
+
+```sh
+python3 -m src.paper watchlist-scaffold KNYC 2026-10-15 \
+    --bracket=:69.5 --bracket=69.5:72.5 --bracket=72.5: \
+    --output data/paper/nyc-watchlist.json
+# edit data/paper/nyc-watchlist.json by hand, then:
+python3 -m src.paper watchlist-validate data/paper/nyc-watchlist.json
+python3 -m src.paper watchlist-explain data/paper/nyc-watchlist.json
+python3 -m src.paper --db data/paper/forward.db observe data/paper/nyc-watchlist.json
+```
+
+`watchlist-scaffold` fills in everything it can derive (coordinates, an
+`event_key`, the `weather_spec` skeleton) but never invents a ticker,
+contract-rules URL, or availability review -- a human must replace those
+placeholder fields before the entry is usable, and `watchlist-validate`
+reports every one still outstanding. `--bracket` takes `LOW:HIGH` in
+Fahrenheit; either side may be empty for an open tail, and a negative bound
+needs the `--bracket=-5:0` form so it is not read as another flag.
+`watchlist-validate` exits `0` when there are no errors (warnings are
+allowed) and `2` otherwise; `watchlist-explain` prints a short plain-text
+summary for a reviewer to eyeball, including bracket coverage gaps/overlaps.
+
 Public endpoints and response contracts checked during implementation:
 [Kalshi market data](https://docs.kalshi.com/getting_started/quick_start_market_data),
 [orderbook](https://docs.kalshi.com/api-reference/market/get-market-orderbook),

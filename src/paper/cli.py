@@ -1,5 +1,7 @@
 """Credential-free CLI for replay and forward paper observations."""
 import argparse
+import dataclasses
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -9,6 +11,94 @@ from src.paper.config import PaperConfig
 
 
 DEFAULT_DB = "data/paper/paper.db"
+
+
+def _now() -> datetime:
+    """Current UTC time. A thin seam so tests can inject a fixed instant."""
+    return datetime.now(timezone.utc)
+
+
+def _parse_bracket(raw: str) -> tuple[float | None, float | None]:
+    """Parse a `--bracket LOW:HIGH` value into `(lower_bound_f, upper_bound_f)`.
+
+    Either side may be empty for an open tail (``":69.5"``, ``"69.5:72.5"``,
+    ``"72.5:"``). A negative bound must be passed as ``--bracket=-5:0``:
+    argparse otherwise treats the leading ``-`` as the start of another
+    option.
+
+    Raises:
+        ValueError: If `raw` is not exactly one `:`-separated pair of numbers
+            or blanks.
+    """
+    parts = raw.split(":")
+    if len(parts) != 2:
+        raise ValueError(f"--bracket must be LOW:HIGH (either side may be empty), got {raw!r}")
+
+    def _side(text: str) -> float | None:
+        text = text.strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            raise ValueError(f"--bracket bound must be a number or empty, got {text!r} in {raw!r}") from None
+
+    return _side(parts[0]), _side(parts[1])
+
+
+def _watchlist_scaffold_command(args) -> int:
+    """Handle `watchlist-scaffold`. Offline: never touches the experiment database."""
+    from src.paper.watchlist import scaffold
+
+    brackets = [_parse_bracket(raw) for raw in args.bracket]
+    entries = scaffold(args.station, args.date, brackets, _now(), utc_offset_hours=args.utc_offset_hours)
+    rendered = json.dumps(entries, indent=2, allow_nan=False)
+    if args.output:
+        output = Path(args.output)
+        # Do not accidentally overwrite the experiment database.
+        if output.resolve() == Path(args.db).resolve():
+            raise ValueError("Watchlist output cannot overwrite the paper database")
+        if output.exists() and not args.force:
+            raise ValueError(f"{output} already exists; pass --force to overwrite")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered + "\n")
+    print(rendered)
+    return 0
+
+
+def _watchlist_validate_command(args) -> int:
+    """Handle `watchlist-validate`. Offline: never touches the experiment database."""
+    from src.paper.watchlist import bracket_coverage, validate
+
+    watchlist = json.loads(Path(args.path).read_text())
+    result = validate(watchlist, _now())
+    payload = {
+        "ok": result.ok,
+        "errors": [dataclasses.asdict(finding) for finding in result.errors],
+        "warnings": [dataclasses.asdict(finding) for finding in result.warnings],
+        "coverage": bracket_coverage(watchlist) if isinstance(watchlist, list) else {},
+    }
+    print(json.dumps(payload, indent=2, allow_nan=False))
+    return 0 if result.ok else 2
+
+
+def _watchlist_explain_command(args) -> int:
+    """Handle `watchlist-explain`. Offline: never touches the experiment database."""
+    from src.paper.watchlist import explain
+
+    watchlist = json.loads(Path(args.path).read_text())
+    print(explain(watchlist))
+    return 0
+
+
+# Offline watchlist-authoring subcommands. They never construct a PaperBroker
+# or require an initialized experiment database -- see their dispatch in
+# main(), which runs before the "database must exist" check below.
+_WATCHLIST_DISPATCH = {
+    "watchlist-scaffold": _watchlist_scaffold_command,
+    "watchlist-validate": _watchlist_validate_command,
+    "watchlist-explain": _watchlist_explain_command,
+}
 
 
 def replay(broker: PaperBroker, path: str) -> dict:
@@ -110,8 +200,38 @@ def main(argv: list[str] | None = None) -> int:
     assess.add_argument("protocol")
     assess.add_argument("--model", required=True, help="model_name to evaluate")
     assess.add_argument("--model-version", required=True, help="model_version to evaluate")
+
+    scaffold_cmd = commands.add_parser(
+        "watchlist-scaffold",
+        help="Generate placeholder watchlist entries for one station/date (offline, no experiment needed)")
+    scaffold_cmd.add_argument("station", help="Station code, e.g. KNYC")
+    scaffold_cmd.add_argument("date", help="Local target date, ISO 8601 (YYYY-MM-DD)")
+    scaffold_cmd.add_argument(
+        "--bracket", action="append", required=True, dest="bracket", metavar="LOW:HIGH",
+        help="Bracket bounds in Fahrenheit, e.g. '69.5:72.5'. Either side may be empty for an open "
+             "tail (':69.5' or '72.5:'). Repeat --bracket for multiple brackets. A negative bound "
+             "must be passed as --bracket=-5:0, or argparse treats it as another option.")
+    scaffold_cmd.add_argument("--utc-offset-hours", type=int, default=None,
+                              help="Override the station's default local-standard UTC offset")
+    scaffold_cmd.add_argument("--output", help="Also write the JSON result to this path")
+    scaffold_cmd.add_argument("--force", action="store_true", help="Overwrite --output if it already exists")
+
+    validate_cmd = commands.add_parser(
+        "watchlist-validate",
+        help="Validate a watchlist JSON file's structure and consistency (offline, no experiment needed)")
+    validate_cmd.add_argument("path")
+
+    explain_cmd = commands.add_parser(
+        "watchlist-explain",
+        help="Print a human-readable watchlist summary for review (offline, no experiment needed)")
+    explain_cmd.add_argument("path")
+
     args = parser.parse_args(argv)
     try:
+        if args.command in _WATCHLIST_DISPATCH:
+            # Offline authoring tools: dispatched before the database-exists
+            # check below, and they never construct a PaperBroker.
+            return _WATCHLIST_DISPATCH[args.command](args)
         if args.command != "init" and not Path(args.db).is_file():
             raise ValueError("Initialize the paper experiment first with 'init'")
         config = None
