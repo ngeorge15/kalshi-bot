@@ -353,6 +353,14 @@ class PaperBroker:
             options = []
             for side, prob, asks in (("yes", p, yes), ("no", 1-p, no)):
                 limit = asks[0][0] + self.config.slippage_cents
+                # Sizing hasn't happened yet, so the real per-contract share of
+                # the order-level fee is unknown; `_fee_cents(limit, 1)` prices
+                # one contract alone, which rounds up on its own and is thus an
+                # upper bound on that share (Kalshi's fee rounds up once per
+                # order, not once per contract -- see trading_fee_cents). Only
+                # used here, for the edge screen and the budget/kelly sizing
+                # below; the fill itself is charged the real order-level fee
+                # via `self._fee_cents(price, count)` (see the `_quote` handler).
                 cost = limit + self._fee_cents(limit, 1)
                 edge = prob - cost / 100
                 if limit <= 99 and cost < 100 and edge >= self.config.min_edge:

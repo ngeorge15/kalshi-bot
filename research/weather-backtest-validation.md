@@ -22,12 +22,18 @@ The 2026 held-out period was NOT used and remains untouched.
 
 | Variant | min_edge | Trades | Hit rate | ROI on cost | P&L/event CI low (cents) |
 | --- | --- | --- | --- | --- | --- |
-| lead1_guarded | 0.02 | 713 | 0.42 | **-13.5%** | -97.1 |
-| lead1_guarded | 0.05 | 673 | 0.41 | **-13.3%** | -92.1 |
-| lead1_guarded | 0.10 | 543 | 0.40 | **-15.9%** | -111.1 |
-| lead2 | 0.02 | 730 | 0.41 | **-13.0%** | -92.3 |
-| lead2 | 0.05 | 702 | 0.41 | **-12.6%** | -89.6 |
-| lead2 | 0.10 | 625 | 0.41 | **-13.0%** | -91.9 |
+| lead1_guarded | 0.02 | 721 | 0.42 | **-11.6%** | -85.8 |
+| lead1_guarded | 0.05 | 679 | 0.42 | **-11.4%** | -84.7 |
+| lead1_guarded | 0.10 | 556 | 0.41 | **-13.6%** | -97.3 |
+| lead2 | 0.02 | 730 | 0.41 | **-12.6%** | -89.4 |
+| lead2 | 0.05 | 706 | 0.41 | **-12.1%** | -86.7 |
+| lead2 | 0.10 | 632 | 0.40 | **-12.9%** | -93.0 |
+
+(Rerun 2026-09-17 after fixing a fee-rounding bug: fees had been rounded up per
+contract rather than once per order, overcharging up to fivefold on deep-priced
+trades. Correcting it trims the loss by 1-2 points of ROI and changes nothing
+qualitative. Brier scores are unaffected — they are a probability metric, not a
+cost one.)
 
 Probability quality, independent of the trading rule (732 events, 4,392 markets):
 

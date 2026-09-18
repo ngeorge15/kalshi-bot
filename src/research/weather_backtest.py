@@ -400,7 +400,7 @@ def fit_bias_sigma(
 # --- 3. Trading rule: EV, fees, position cap, settlement ------------------------
 
 def evaluate_sides(
-    p_yes: float, yes_bid_cents: int, yes_ask_cents: int, fee_type: str, fee_multiplier: float
+    p_yes: float, yes_bid_cents: int, yes_ask_cents: int, fee_type: str, fee_multiplier: float, contracts: int
 ) -> dict[str, dict | None]:
     """Per-contract EV (in cents, fee-inclusive) for the YES and NO side of one bracket.
 
@@ -409,22 +409,37 @@ def evaluate_sides(
     the tradeable `[1, 99]` cent range (a 0 or 100 cent quote is not a real
     fill price).
 
+    Kalshi's taker fee (`trading_fee_cents`) rounds up to the next whole cent
+    once per order, not once per contract, so it is computed here at the
+    order's actual `contracts` count and then divided back down to a
+    per-contract figure for the EV comparison -- never by pricing one
+    contract and multiplying, which overcharges by rounding up `contracts`
+    times instead of once (e.g. a 10-contract, 98-cent NO order owes 2 cents
+    total, not 10).
+
     Args:
         p_yes: Model P(bracket resolves YES).
         yes_bid_cents, yes_ask_cents: The bracket's quote at T, in cents.
         fee_type, fee_multiplier: Passed to `trading_fee_cents`.
+        contracts: The contract count this order would actually be sized at;
+            the fee is computed once for the whole order at this count.
 
     Returns:
-        `{"yes": {"cost_cents", "fee_cents", "ev_cents"} | None, "no": {...} | None}`.
+        `{"yes": {"cost_cents", "fee_cents", "ev_cents"} | None, "no": {...} | None}`,
+        where `cost_cents` is per-contract, `fee_cents` is the order-level fee
+        for `contracts` contracts (not per-contract), and `ev_cents` is the
+        per-contract EV net of that order-level fee spread over `contracts`.
     """
     yes_cost, no_cost = yes_ask_cents, 100 - yes_bid_cents
     result: dict[str, dict | None] = {"yes": None, "no": None}
     if 1 <= yes_cost <= 99:
-        fee = trading_fee_cents(yes_cost, 1, fee_type=fee_type, fee_multiplier=fee_multiplier, is_maker=False)
-        result["yes"] = {"cost_cents": yes_cost, "fee_cents": fee, "ev_cents": p_yes * 100 - yes_cost - fee}
+        fee = trading_fee_cents(yes_cost, contracts, fee_type=fee_type, fee_multiplier=fee_multiplier, is_maker=False)
+        result["yes"] = {"cost_cents": yes_cost, "fee_cents": fee,
+                          "ev_cents": p_yes * 100 - yes_cost - fee / contracts}
     if 1 <= no_cost <= 99:
-        fee = trading_fee_cents(no_cost, 1, fee_type=fee_type, fee_multiplier=fee_multiplier, is_maker=False)
-        result["no"] = {"cost_cents": no_cost, "fee_cents": fee, "ev_cents": (1 - p_yes) * 100 - no_cost - fee}
+        fee = trading_fee_cents(no_cost, contracts, fee_type=fee_type, fee_multiplier=fee_multiplier, is_maker=False)
+        result["no"] = {"cost_cents": no_cost, "fee_cents": fee,
+                         "ev_cents": (1 - p_yes) * 100 - no_cost - fee / contracts}
     return result
 
 
@@ -433,16 +448,20 @@ def select_top_trades_for_event(candidates: list[dict], max_positions_per_event:
     return sorted(candidates, key=lambda c: c["ev_cents"], reverse=True)[:max_positions_per_event]
 
 
-def settle_pnl_cents(side: str, cost_cents: int, fee_cents: int, result: str) -> int:
-    """Per-contract P&L in cents: `100` if `side` won, else `0`, minus cost and fee.
+def settle_pnl_cents(side: str, cost_cents: int, fee_cents: float, contracts: int, result: str) -> float:
+    """Total order P&L in cents: `100 * contracts` if `side` won, else `0`, minus cost and fee.
 
     Args:
         side: `"yes"` or `"no"`.
-        cost_cents, fee_cents: From `evaluate_sides`.
+        cost_cents: Per-contract cost, from `evaluate_sides`.
+        fee_cents: The order-level fee for the whole `contracts`-sized
+            order (from `evaluate_sides`), charged once -- never multiplied
+            by `contracts` here, since it already covers all of them.
+        contracts: Number of contracts in the order.
         result: The market's settlement, `"yes"` or `"no"`.
     """
-    outcome_cents = 100 if result == side else 0
-    return outcome_cents - cost_cents - fee_cents
+    outcome_cents = 100 * contracts if result == side else 0
+    return outcome_cents - cost_cents * contracts - fee_cents
 
 
 # --- 4. Metrics -------------------------------------------------------------------
@@ -689,7 +708,9 @@ def run_backtest(
                     skip_reasons["unsettled_result"] += 1
                     continue
 
-                sides = evaluate_sides(p_yes, price.yes_bid_cents, price.yes_ask_cents, fee_type, fee_multiplier)
+                sides = evaluate_sides(
+                    p_yes, price.yes_bid_cents, price.yes_ask_cents, fee_type, fee_multiplier, contracts
+                )
                 for side, info in sides.items():
                     if info is None:
                         continue
@@ -705,10 +726,10 @@ def run_backtest(
                 partition_failures.append({"event_key": event_key, "sum_p": p_sum, "n_markets": len(event_rows)})
 
             for chosen in select_top_trades_for_event(candidates, max_positions_per_event):
-                pnl_per_contract = settle_pnl_cents(
-                    chosen["side"], chosen["cost_cents"], chosen["fee_cents"], chosen["result"]
+                pnl_total = settle_pnl_cents(
+                    chosen["side"], chosen["cost_cents"], chosen["fee_cents"], contracts, chosen["result"]
                 )
-                trades.append({**chosen, "contracts": contracts, "pnl_cents": pnl_per_contract * contracts})
+                trades.append({**chosen, "contracts": contracts, "pnl_cents": pnl_total})
 
     return _build_report(
         trades, skip_reasons, brier_rows, calibration_rows, spreads, partition_failures,
@@ -728,7 +749,14 @@ def _build_report(
     train_start: date, train_end: date, eval_start: date, eval_end: date,
     fits: dict[str, StationFit], protocol_verified: bool, n_resamples: int, confidence: float, seed: int,
 ) -> dict[str, Any]:
-    """Assemble the final metrics dict from a completed run's raw trade/skip/row lists."""
+    """Assemble the final metrics dict from a completed run's raw trade/skip/row lists.
+
+    Each entry in `trades` (and the returned report's `"trades"` list) has
+    `cost_cents` (per-contract) and `fee_cents` (the order-level Kalshi
+    taker fee for the trade's whole `contracts` count, per `evaluate_sides`
+    -- not a per-contract figure), plus `contracts` and `pnl_cents` (the
+    order's total settled P&L, from `settle_pnl_cents`).
+    """
     n_trades = len(trades)
     n_events_traded = len({t["event_key"] for t in trades})
     wins = sum(1 for t in trades if t["pnl_cents"] > 0)

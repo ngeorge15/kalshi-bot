@@ -232,10 +232,14 @@ def test_bracket_probabilities_sum_to_one_across_a_full_partition():
 # ---------------------------------------------------------------------------
 
 class TestEvaluateSides:
-    def test_yes_and_no_ev_match_hand_computed_fees(self):
+    def test_yes_and_no_ev_match_hand_computed_fees_for_a_single_contract(self):
+        # contracts=1 is the case where order-level and per-contract fees
+        # coincide, so this doubles as the "unchanged for a 1-contract order"
+        # pin: trading_fee_cents(cost, 1, ...) is exactly what evaluate_sides
+        # must charge here.
         p_yes = 0.6
         yes_bid, yes_ask = 45, 50
-        sides = wb.evaluate_sides(p_yes, yes_bid, yes_ask, "quadratic", 1.0)
+        sides = wb.evaluate_sides(p_yes, yes_bid, yes_ask, "quadratic", 1.0, contracts=1)
         expected_yes_fee = trading_fee_cents(yes_ask, 1, fee_type="quadratic", fee_multiplier=1.0, is_maker=False)
         expected_no_fee = trading_fee_cents(100 - yes_bid, 1, fee_type="quadratic", fee_multiplier=1.0, is_maker=False)
         assert sides["yes"]["fee_cents"] == expected_yes_fee
@@ -245,14 +249,43 @@ class TestEvaluateSides:
         assert sides["no"]["cost_cents"] == 100 - yes_bid
         assert sides["no"]["ev_cents"] == pytest.approx((1 - p_yes) * 100 - (100 - yes_bid) - expected_no_fee)
 
+    def test_fee_is_charged_once_at_the_order_level_not_per_contract(self):
+        # Bug report's worked example: a NO order of 10 contracts costing 98c
+        # (yes_bid=2 -> no_cost=100-2=98). The true order-level fee is
+        # ceil(0.07 * 10 * 98 * 2 / 10000) = ceil(1.372) = 2 cents total. The
+        # old (buggy) behavior priced one contract (ceil(0.07*98*2/100) =
+        # ceil(0.1372) = 1c) and multiplied by 10 contracts = 10c -- a 5x
+        # overcharge.
+        sides = wb.evaluate_sides(0.5, 2, 99, "quadratic", 1.0, contracts=10)
+        assert sides["no"]["cost_cents"] == 98
+        assert sides["no"]["fee_cents"] == 2
+        per_contract_fee = trading_fee_cents(98, 1, fee_type="quadratic", fee_multiplier=1.0, is_maker=False)
+        assert per_contract_fee * 10 == 10  # the old (wrong) per-contract-times-count answer
+        assert sides["no"]["fee_cents"] != per_contract_fee * 10
+
+    def test_fee_at_50_cents_for_100_contracts_is_175_cents(self):
+        # The widely-cited worked example from src/paper/fees.py's docstring.
+        sides = wb.evaluate_sides(0.5, 50, 50, "quadratic", 1.0, contracts=100)
+        assert sides["yes"]["fee_cents"] == 175
+        assert sides["no"]["fee_cents"] == 175
+
+    def test_ev_cents_reflects_the_order_level_fee_spread_over_contracts(self):
+        p_yes = 0.6
+        yes_bid, yes_ask = 45, 50
+        contracts = 10
+        sides = wb.evaluate_sides(p_yes, yes_bid, yes_ask, "quadratic", 1.0, contracts=contracts)
+        order_fee = trading_fee_cents(yes_ask, contracts, fee_type="quadratic", fee_multiplier=1.0, is_maker=False)
+        assert sides["yes"]["fee_cents"] == order_fee
+        assert sides["yes"]["ev_cents"] == pytest.approx(p_yes * 100 - yes_ask - order_fee / contracts)
+
     def test_side_excluded_when_cost_at_boundary_zero_or_hundred(self):
         # yes_ask == 100 -> yes cost 100, untradeable; yes_bid == 0 -> no cost 100, untradeable.
-        sides = wb.evaluate_sides(0.5, 0, 100, "quadratic", 1.0)
+        sides = wb.evaluate_sides(0.5, 0, 100, "quadratic", 1.0, contracts=10)
         assert sides["yes"] is None
         assert sides["no"] is None
 
     def test_side_included_at_minimum_and_maximum_tradeable_cost(self):
-        sides = wb.evaluate_sides(0.5, 99, 1, "quadratic", 1.0)
+        sides = wb.evaluate_sides(0.5, 99, 1, "quadratic", 1.0, contracts=10)
         assert sides["yes"] is not None  # cost 1
         assert sides["no"] is not None  # cost 1
 
@@ -287,17 +320,25 @@ class TestSelectTopTradesForEvent:
 # ---------------------------------------------------------------------------
 
 class TestSettlePnlCents:
-    def test_yes_win(self):
-        assert wb.settle_pnl_cents("yes", cost_cents=30, fee_cents=2, result="yes") == 100 - 30 - 2
+    def test_yes_win_single_contract_unchanged(self):
+        assert wb.settle_pnl_cents("yes", cost_cents=30, fee_cents=2, contracts=1, result="yes") == 100 - 30 - 2
 
-    def test_yes_loss(self):
-        assert wb.settle_pnl_cents("yes", cost_cents=30, fee_cents=2, result="no") == 0 - 30 - 2
+    def test_yes_loss_single_contract_unchanged(self):
+        assert wb.settle_pnl_cents("yes", cost_cents=30, fee_cents=2, contracts=1, result="no") == 0 - 30 - 2
 
-    def test_no_win(self):
-        assert wb.settle_pnl_cents("no", cost_cents=70, fee_cents=2, result="no") == 100 - 70 - 2
+    def test_no_win_single_contract_unchanged(self):
+        assert wb.settle_pnl_cents("no", cost_cents=70, fee_cents=2, contracts=1, result="no") == 100 - 70 - 2
 
-    def test_no_loss(self):
-        assert wb.settle_pnl_cents("no", cost_cents=70, fee_cents=2, result="yes") == 0 - 70 - 2
+    def test_no_loss_single_contract_unchanged(self):
+        assert wb.settle_pnl_cents("no", cost_cents=70, fee_cents=2, contracts=1, result="yes") == 0 - 70 - 2
+
+    def test_fee_cents_is_charged_once_for_the_whole_order_not_per_contract(self):
+        # 10 contracts at 30c/each, order-level fee 2c (not 2c * 10): win pays
+        # out 100*10, costs 30*10, minus the single order-level fee.
+        assert (wb.settle_pnl_cents("yes", cost_cents=30, fee_cents=2, contracts=10, result="yes")
+                == 100 * 10 - 30 * 10 - 2)
+        assert (wb.settle_pnl_cents("yes", cost_cents=30, fee_cents=2, contracts=10, result="no")
+                == 0 - 30 * 10 - 2)
 
 
 # ---------------------------------------------------------------------------
@@ -573,14 +614,22 @@ class TestRunBacktestEndToEnd:
 
         nd = NormalDist(mu=mu, sigma=sigma)
         p_yes = nd.cdf(71.5) - nd.cdf(69.5)
-        expected_fee = trading_fee_cents(30, 1, fee_type="quadratic", fee_multiplier=1.0, is_maker=False)
-        expected_ev = p_yes * 100 - 30 - expected_fee
+        # The order trades at run_backtest's default DEFAULT_CONTRACTS_PER_TRADE
+        # (10) contracts, so the fee is the order-level fee for 10 contracts at
+        # 30c -- not 10x the per-contract (count=1) fee.
+        expected_order_fee = trading_fee_cents(
+            30, wb.DEFAULT_CONTRACTS_PER_TRADE, fee_type="quadratic", fee_multiplier=1.0, is_maker=False
+        )
+        expected_ev = p_yes * 100 - 30 - expected_order_fee / wb.DEFAULT_CONTRACTS_PER_TRADE
         assert expected_ev / 100.0 >= 0.05  # sanity: this is really the favorable side
         assert trade["ev_cents"] == pytest.approx(expected_ev)
+        assert trade["fee_cents"] == expected_order_fee
 
-        expected_pnl_per_contract = 100 - 30 - expected_fee  # settled "yes", side "yes" -> win
-        assert trade["pnl_cents"] == expected_pnl_per_contract * wb.DEFAULT_CONTRACTS_PER_TRADE
-        assert report["total_pnl_cents"] == expected_pnl_per_contract * wb.DEFAULT_CONTRACTS_PER_TRADE
+        # settled "yes", side "yes" -> win: payout on all 10 contracts, minus
+        # 10x the per-contract cost and the single order-level fee.
+        expected_pnl_total = 100 * wb.DEFAULT_CONTRACTS_PER_TRADE - 30 * wb.DEFAULT_CONTRACTS_PER_TRADE - expected_order_fee
+        assert trade["pnl_cents"] == expected_pnl_total
+        assert report["total_pnl_cents"] == expected_pnl_total
         assert report["hit_rate"] == 1.0
         assert report["n_events_traded"] == 1
         assert report["skip_reasons"].get("stale", 0) == 0
