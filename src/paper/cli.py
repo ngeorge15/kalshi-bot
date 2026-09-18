@@ -91,13 +91,43 @@ def _watchlist_explain_command(args) -> int:
     return 0
 
 
+def _watchlist_generate_command(args) -> int:
+    """Handle `watchlist-generate`. Never touches the experiment database, but unlike the
+    other three watchlist commands it does reach the network: it fetches live Kalshi
+    market data for the requested stations/date."""
+    from src.research.watchlist_gen import build_watchlist
+
+    stations = [s.strip() for s in args.stations.split(",") if s.strip()]
+    if not stations:
+        raise ValueError("--stations must name at least one station code")
+    entries = build_watchlist(stations, args.date, _now(), available=args.available,
+                              eligibility_source=args.eligibility_source,
+                              eligibility_hours=args.eligibility_hours)
+    rendered = json.dumps(entries, indent=2, allow_nan=False)
+    if args.output:
+        output = Path(args.output)
+        # Do not accidentally overwrite the experiment database.
+        if output.resolve() == Path(args.db).resolve():
+            raise ValueError("Watchlist output cannot overwrite the paper database")
+        if output.exists() and not args.force:
+            raise ValueError(f"{output} already exists; pass --force to overwrite")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered + "\n")
+    print(rendered)
+    return 0
+
+
 # Offline watchlist-authoring subcommands. They never construct a PaperBroker
 # or require an initialized experiment database -- see their dispatch in
 # main(), which runs before the "database must exist" check below.
+# watchlist-generate is the one exception to "offline": it makes real network
+# calls to Kalshi's public market API, but is grouped here because it still
+# needs no experiment database and never marks anything available on its own.
 _WATCHLIST_DISPATCH = {
     "watchlist-scaffold": _watchlist_scaffold_command,
     "watchlist-validate": _watchlist_validate_command,
     "watchlist-explain": _watchlist_explain_command,
+    "watchlist-generate": _watchlist_generate_command,
 }
 
 
@@ -225,6 +255,24 @@ def main(argv: list[str] | None = None) -> int:
         "watchlist-explain",
         help="Print a human-readable watchlist summary for review (offline, no experiment needed)")
     explain_cmd.add_argument("path")
+
+    generate_cmd = commands.add_parser(
+        "watchlist-generate",
+        help="Generate watchlist entries from Kalshi's live market data for one date "
+             "(the one watchlist command that reaches the network; still no experiment needed)")
+    generate_cmd.add_argument("--stations", required=True,
+                              help="Comma-separated station codes, e.g. KNYC,KMDW,KMIA,KAUS")
+    generate_cmd.add_argument("--date", required=True, help="Local target date, ISO 8601 (YYYY-MM-DD)")
+    generate_cmd.add_argument("--output", help="Also write the JSON result to this path")
+    generate_cmd.add_argument("--force", action="store_true", help="Overwrite --output if it already exists")
+    generate_cmd.add_argument("--available", action="store_true",
+                              help="Mark generated entries eligible; requires --eligibility-source. "
+                                   "Omit this unless a human has actually just verified tradeability "
+                                   "-- a market being listed by the API does not mean it is tradeable.")
+    generate_cmd.add_argument("--eligibility-source",
+                              help="Who verified current availability and when (required with --available)")
+    generate_cmd.add_argument("--eligibility-hours", type=float, default=24.0,
+                              help="Eligibility window length in hours, only used with --available")
 
     args = parser.parse_args(argv)
     try:

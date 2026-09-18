@@ -95,6 +95,30 @@ needs the `--bracket=-5:0` form so it is not read as another flag.
 allowed) and `2` otherwise; `watchlist-explain` prints a short plain-text
 summary for a reviewer to eyeball, including bracket coverage gaps/overlaps.
 
+Hand-authoring with `watchlist-scaffold` still works, but for the four mapped
+weather stations (KNYC/KMDW/KMIA/KAUS) `watchlist-generate`
+(`src/research/watchlist_gen.py`) mechanically builds a full watchlist from
+Kalshi's own live market data instead: real tickers, bounds parsed from the
+market payload (never guessed from ticker text), and each bracket's own
+settlement-source reference, for every open bracket of one event:
+
+```sh
+python3 -m src.paper watchlist-generate --stations KNYC,KMDW,KMIA,KAUS --date 2026-10-15 \
+    --output data/paper/nyc-watchlist.json
+python3 -m src.paper watchlist-validate data/paper/nyc-watchlist.json
+python3 -m src.paper watchlist-explain data/paper/nyc-watchlist.json
+```
+
+`watchlist-generate` is the one watchlist command that reaches the network
+(a handful of unauthenticated `GET`s against Kalshi's public market API); the
+other three stay fully offline. It never marks an entry available -- pass
+`--available --eligibility-source "..."` only once a human has actually just
+confirmed the market is tradeable, otherwise it refuses with exit code `2`.
+Without `--available`, the generated file validates with zero errors and only
+the same eligibility-window warning `scaffold` output would carry (the window
+is already expired, forcing a human review before `observe` acts on it
+outside `research_only` mode).
+
 Public endpoints and response contracts checked during implementation:
 [Kalshi market data](https://docs.kalshi.com/getting_started/quick_start_market_data),
 [orderbook](https://docs.kalshi.com/api-reference/market/get-market-orderbook),

@@ -1,11 +1,15 @@
-"""Tests for the offline watchlist-authoring CLI subcommands.
+"""Tests for the offline watchlist-authoring CLI subcommands, plus watchlist-generate.
 
-These commands (`watchlist-scaffold`, `watchlist-validate`, `watchlist-explain`)
-are authoring tools: they must work without an initialized experiment database
-and must never create one. Coverage here is CLI plumbing (argument parsing,
-JSON/text rendering, exit codes, file I/O); the underlying semantics of
-`scaffold`/`validate`/`bracket_coverage`/`explain` are tested in
-`tests/paper/test_watchlist.py`.
+`watchlist-scaffold`, `watchlist-validate`, and `watchlist-explain` are authoring
+tools: they must work without an initialized experiment database and must never
+create one. Coverage here is CLI plumbing (argument parsing, JSON/text rendering,
+exit codes, file I/O); the underlying semantics of `scaffold`/`validate`/
+`bracket_coverage`/`explain` are tested in `tests/paper/test_watchlist.py`.
+
+`watchlist-generate` is grouped with them (same "no experiment database" rule)
+but is the one command that reaches the network; `build_watchlist` itself is
+monkeypatched here so these tests make no real calls -- its semantics are
+covered in `tests/research/test_watchlist_gen.py`.
 """
 from datetime import datetime, timezone
 import json
@@ -13,6 +17,7 @@ import json
 import pytest
 
 import src.paper.cli as cli
+import src.research.watchlist_gen as watchlist_gen
 from src.paper.cli import main
 from src.paper.watchlist import scaffold
 
@@ -195,3 +200,91 @@ class TestExplain:
         path.write_text("not json at all")
         assert main(["--db", db, "watchlist-explain", str(path)]) == 2
         assert capsys.readouterr().err.startswith("Paper command failed:")
+
+
+def _stub_build_watchlist(monkeypatch, entries=None, capture=None):
+    """Monkeypatch build_watchlist so `watchlist-generate` never touches the network."""
+    def _build(stations, target_date, now, *, available=False, eligibility_source=None,
+               eligibility_hours=24.0):
+        if capture is not None:
+            capture.append(dict(stations=stations, target_date=target_date, now=now,
+                                available=available, eligibility_source=eligibility_source,
+                                eligibility_hours=eligibility_hours))
+        return entries if entries is not None else [{"ticker": "KXHIGHNY-26MAR15-B70"}]
+
+    monkeypatch.setattr(watchlist_gen, "build_watchlist", _build)
+
+
+class TestGenerate:
+    def test_happy_path_parses_stations_and_prints_json(self, tmp_path, capsys, monkeypatch):
+        db = _missing_db(tmp_path)
+        calls = []
+        _stub_build_watchlist(monkeypatch, capture=calls)
+        assert main(["--db", db, "watchlist-generate", "--stations", "KNYC,KMDW", "--date", "2026-03-15"]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out == [{"ticker": "KXHIGHNY-26MAR15-B70"}]
+        assert calls[0]["stations"] == ["KNYC", "KMDW"]
+        assert calls[0]["target_date"] == "2026-03-15"
+        assert calls[0]["now"] == FIXED_NOW
+        assert calls[0]["available"] is False
+        assert not (tmp_path / "nonexistent.db").exists()
+
+    def test_available_flag_passed_through(self, tmp_path, capsys, monkeypatch):
+        db = _missing_db(tmp_path)
+        calls = []
+        _stub_build_watchlist(monkeypatch, capture=calls)
+        assert main(["--db", db, "watchlist-generate", "--stations", "KNYC", "--date", "2026-03-15",
+                     "--available", "--eligibility-source", "reviewed by hand"]) == 0
+        assert calls[0]["available"] is True
+        assert calls[0]["eligibility_source"] == "reviewed by hand"
+
+    def test_refusal_without_eligibility_source_exits_2(self, tmp_path, capsys, monkeypatch):
+        db = _missing_db(tmp_path)
+
+        def _refuse(stations, target_date, now, **kwargs):
+            raise ValueError("available=True requires a non-empty eligibility_source")
+
+        monkeypatch.setattr(watchlist_gen, "build_watchlist", _refuse)
+        assert main(["--db", db, "watchlist-generate", "--stations", "KNYC", "--date", "2026-03-15",
+                     "--available"]) == 2
+        assert "eligibility_source" in capsys.readouterr().err
+
+    def test_blank_stations_rejected(self, tmp_path, capsys, monkeypatch):
+        db = _missing_db(tmp_path)
+        _stub_build_watchlist(monkeypatch)
+        assert main(["--db", db, "watchlist-generate", "--stations", " , ", "--date", "2026-03-15"]) == 2
+        assert "at least one station" in capsys.readouterr().err
+
+    def test_output_writes_file(self, tmp_path, capsys, monkeypatch):
+        db = _missing_db(tmp_path)
+        _stub_build_watchlist(monkeypatch)
+        out_path = tmp_path / "generated.json"
+        assert main(["--db", db, "watchlist-generate", "--stations", "KNYC", "--date", "2026-03-15",
+                     "--output", str(out_path)]) == 0
+        stdout = capsys.readouterr().out
+        assert json.loads(out_path.read_text()) == json.loads(stdout)
+
+    def test_refuses_to_overwrite_without_force(self, tmp_path, capsys, monkeypatch):
+        db = _missing_db(tmp_path)
+        _stub_build_watchlist(monkeypatch)
+        out_path = tmp_path / "generated.json"
+        out_path.write_text("existing content")
+        assert main(["--db", db, "watchlist-generate", "--stations", "KNYC", "--date", "2026-03-15",
+                     "--output", str(out_path)]) == 2
+        assert "already exists" in capsys.readouterr().err
+        assert out_path.read_text() == "existing content"
+
+    def test_output_cannot_overwrite_db_path(self, tmp_path, capsys, monkeypatch):
+        db = tmp_path / "same.db"
+        _stub_build_watchlist(monkeypatch)
+        assert main(["--db", str(db), "watchlist-generate", "--stations", "KNYC", "--date", "2026-03-15",
+                     "--output", str(db)]) == 2
+        assert "cannot overwrite the paper database" in capsys.readouterr().err
+        assert not db.exists()
+
+    def test_no_db_created(self, tmp_path, capsys, monkeypatch):
+        db = _missing_db(tmp_path)
+        _stub_build_watchlist(monkeypatch)
+        assert main(["--db", db, "watchlist-generate", "--stations", "KNYC", "--date", "2026-03-15"]) == 0
+        capsys.readouterr()
+        assert not (tmp_path / "nonexistent.db").exists()
