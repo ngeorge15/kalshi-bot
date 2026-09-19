@@ -5,6 +5,7 @@ All tests use monkeypatched CACHE_DIR so no real filesystem is touched outside t
 """
 
 import json
+import threading
 import time
 import pytest
 
@@ -115,3 +116,80 @@ def test_different_params_produce_different_keys():
     key1 = cache_module._cache_key(NAMESPACE, {"team": "LAL"})
     key2 = cache_module._cache_key(NAMESPACE, {"team": "GSW"})
     assert key1 != key2
+
+
+class TestCacheSetIsAtomic:
+    """cache_set must never leave a reader a half-written file.
+
+    Two backtests scanning overlapping date ranges hit the same cache key at
+    the same time; an in-place write interleaves and the next read fails with
+    `Extra data`. An interrupted run leaves a truncated file behind forever.
+    Both were observed in this repo before the write was made atomic.
+    """
+
+    def test_no_temp_files_are_left_behind(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cache_module, "CACHE_DIR", tmp_path)
+        cache_module.cache_set("ns", {"a": 1}, {"v": "x"})
+        leftovers = list(tmp_path.rglob("*.tmp"))
+        assert leftovers == []
+
+    def test_a_failed_write_leaves_the_previous_value_intact(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cache_module, "CACHE_DIR", tmp_path)
+        cache_module.cache_set("ns", {"a": 1}, {"v": "good"})
+
+        class Unserialisable:
+            pass
+
+        with pytest.raises(TypeError):
+            cache_module.cache_set("ns", {"a": 1}, {"v": Unserialisable()})
+
+        assert cache_module.cache_get("ns", {"a": 1}, ttl_seconds=3600) == {"v": "good"}
+        assert list(tmp_path.rglob("*.tmp")) == []
+
+    def test_concurrent_writers_never_produce_an_unparseable_file(
+        self, tmp_path, monkeypatch
+    ):
+        """The actual observed corruption: `json.JSONDecodeError: Extra data`.
+
+        Path.write_text truncates, so overwriting with a shorter payload is
+        safe on its own -- the corruption came from two processes writing the
+        same key at once and interleaving. Each thread here writes a payload
+        of a different length to the same key many times; with a non-atomic
+        write a reader eventually sees one payload's head followed by
+        another's tail, or an empty file mid-truncate. Reproduced against the
+        old implementation before this fix: a reader hit JSONDecodeError
+        within a few hundred reads. The backtest logs showed the same class
+        of failure as `Extra data`.
+        """
+        monkeypatch.setattr(cache_module, "CACHE_DIR", tmp_path)
+        params = {"a": 1}
+        payloads = [{"v": str(n) * (1000 * n)} for n in range(1, 6)]
+        errors: list[Exception] = []
+
+        def writer(payload):
+            try:
+                for _ in range(40):
+                    cache_module.cache_set("ns", params, payload)
+            except Exception as exc:  # pragma: no cover - surfaced via errors
+                errors.append(exc)
+
+        def reader():
+            try:
+                for _ in range(200):
+                    got = cache_module.cache_get("ns", params, ttl_seconds=3600)
+                    if got is not None:
+                        assert got in payloads
+            except Exception as exc:  # pragma: no cover - surfaced via errors
+                errors.append(exc)
+
+        threads = [threading.Thread(target=writer, args=(p,)) for p in payloads]
+        threads.append(threading.Thread(target=reader))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        assert list(tmp_path.rglob("*.tmp")) == []
+        final = cache_module.cache_get("ns", params, ttl_seconds=3600)
+        assert final in payloads

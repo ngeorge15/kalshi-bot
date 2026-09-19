@@ -26,6 +26,8 @@ Usage::
 import hashlib
 import json
 import logging
+import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -167,5 +169,24 @@ def cache_set(namespace: str, params: dict, value: dict) -> None:
     key = _cache_key(namespace, params)
     key.parent.mkdir(parents=True, exist_ok=True)
     payload = {"cached_at": time.time(), "value": value}
-    key.write_text(json.dumps(payload))
+    # Written via a temp file in the same directory and then renamed, because
+    # os.replace is atomic on POSIX: a reader either sees the whole previous
+    # file or the whole new one, never a half-written mixture. Writing in
+    # place is not safe here -- two backtests scanning overlapping date
+    # ranges hit the same key concurrently and interleave their writes, which
+    # shows up later as `json.JSONDecodeError: Extra data` on read, and an
+    # interrupted run leaves a truncated file behind forever. Both were
+    # observed before this was made atomic.
+    tmp_fd, tmp_name = tempfile.mkstemp(dir=str(key.parent), suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, "w") as handle:
+            json.dump(payload, handle)
+        os.replace(tmp_name, key)
+    except BaseException:
+        # Leave no partial file behind on failure, including on KeyboardInterrupt.
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     logger.debug("Cache set: %s", key)
