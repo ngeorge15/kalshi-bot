@@ -63,12 +63,47 @@ Probed at Central Park for `ecmwf_aifs025_single`:
 | **2025-03-01** | **24/24** |
 | 2025-03-08 | 24/24 |
 
-So the AIFS fixed-lead archive begins between 2025-02-15 and 2025-03-01. Treat
-**2025-03-01** as the usable start, by the same rule
+Bisected more precisely during implementation: null through 02-15, lead1 only
+on 02-18, both leads from **2025-02-20**, which is the value
+`MODEL_ARCHIVE_USABLE_START` now carries. Treat it as a usable start by the
+same rule
 `NBM_ARCHIVE_USABLE_START` already encodes: a sparsely-null tail is "not yet
 available", not an error. That is ~10 months of training data to the
 `TRAIN_END` of 2025-12-31 — enough to fit, not enough to be relaxed about
 overfitting, and a reason to keep the parameter count low.
+
+### A coverage caveat found in implementation
+
+The other five models are steady once their archive begins. **UKMO is not.**
+Biweekly probes from 2024-08 through mid-2025 kept finding whole days with one
+or both leads null, and a real June-2025 build at Central Park had UKMO lead1
+coverage at 72% and lead2 at 48%, against 100% for every other model. The
+null/completeness machinery handles this correctly -- those days contribute
+nothing and are never imputed -- but the archive start for UKMO is a floor,
+not a coverage guarantee, and `n_models` is what a consumer must actually
+filter on.
+
+### A first data point, too small to mean anything
+
+A 25-complete-day build at Central Park for June 2025 gave lead1 MAE:
+
+| model | MAE | coverage |
+|---|---|---|
+| `ecmwf_aifs025_single` | 1.62F | 100% |
+| `ncep_nbm_conus` | 1.67F | 100% |
+| `icon_seamless` | 1.98F | 100% |
+| `ukmo_global_deterministic_10km` | 2.05F | 72% |
+| `ecmwf_ifs025` | 2.86F | 100% |
+| `gfs_seamless` | 3.12F | 100% |
+| ensemble mean | 1.65F | 100% |
+
+It is tempting to read the first row as AIFS beating NBM and vindicating the AI
+model. **It is not evidence of that.** The gap is 0.05F over 25 days, one
+station, one month, one season -- comfortably inside noise, and the ensemble
+mean landing between the two is exactly what a sample this size would show
+whether or not ensembling helps. It is recorded here only so that nobody
+later remembers it as a result. The caution in the previous section stands
+until a full-period run says otherwise.
 
 ## The two experiments this unlocks
 
