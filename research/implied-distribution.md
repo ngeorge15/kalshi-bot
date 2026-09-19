@@ -161,3 +161,118 @@ regardless of which way it falls.
 - [Gneiting et al., calibration and sharpness / rank histograms](https://arxiv.org/pdf/1310.0236)
 - [On the number of bins in a rank histogram, arXiv:2005.09018](https://arxiv.org/pdf/2005.09018)
 - This repo: `research/longshot-bias.md`, `research/kalshi-fees.md`, `research/intraday-floor.md`
+
+---
+
+# Results
+
+*Run 2026-09-19, 2024-10-24 to TRAIN_END 2025-12-31, four stations, **1,511
+usable events** (8 skipped for missing prices, 217 for stale prices, 0 for an
+incomplete ladder — the partition check never had to reject one). The 2026
+holdout is untouched. The predeclared design above is unedited.*
+
+## The shape mispricing is real
+
+Primary deliverable — PIT histogram, mid prices, 10 bins:
+
+```
+[95, 123, 163, 166, 144, 147, 186, 175, 163, 149]     expected ~151/bin
+```
+
+Clustered E[(PIT − 0.5)²] = **0.0760**, 95% CI **(0.0724, 0.0795)**, against the
+uniform reference 1/12 = 0.0833. The interval lies entirely below the reference:
+**hump-shaped, the implied distribution is too wide.** The market puts more
+probability in the tails than the weather actually delivers.
+
+It survives every robustness check we set for it:
+
+- **Executable prices agree**: CI (0.0684, 0.0753), same direction. This is the
+  check that killed the taking-side result in `longshot-bias.md`, where a signal
+  present at the midpoint reversed once you priced it at the executable side.
+  Here it does not reverse.
+- **Tail handling does not matter**: dropping the unbounded terminal brackets
+  entirely (`truncate` mode, n=1307) gives the same verdict for both price
+  fields. The conclusion is not an artefact of how open tails are treated,
+  which was the ambiguity most likely to manufacture a result.
+
+**Overround**, recorded rather than normalised away: ladders sum to a mean of
+**107.75c** at mid (median 106.50c) and **120.51c** at executable prices (median
+116.00c). The full partition costs 8-20% more than the 100c it pays.
+
+## And it is three times too small to trade
+
+Falsification check 3 killed it. The direction was read off the PIT — too wide
+means **sell** the tails — and asserted in code against the diagnostic, so it
+could not be chosen to make the P&L positive.
+
+Selling the tails: 2,040 trades over 1,414 events, 90.3% hit rate, total
+**−35,625c**, mean **−17.46c** per order, event-clustered 95% CI
+**(−40.71, −10.17)c** per event. Entirely negative — a confident loss, not an
+inconclusive one.
+
+The decomposition is the whole story:
+
+| | cents |
+|---|---|
+| mean **mid** of the traded tail brackets | 10.24 |
+| **realised** settle rate of those brackets | 9.66 |
+| the actual edge at mid | **0.58** |
+| mean **bid** — what you receive selling | 8.36 |
+| the spread you cross | **1.88** |
+
+The market's midpoint really does overprice these tails, by 0.58c. The spread
+is **3.2x** that. And the effect is cleanly monotone where it matters:
+
+| sold at YES price | n | settled YES | mean mid |
+|---|---|---|---|
+| 0-2c | 658 | 1.22% | 2.66c |
+| 2-4c | 536 | 2.24% | 3.93c |
+| 4-6c | 200 | 3.50% | 6.32c |
+
+Cheap tails settle YES at roughly half their quoted midpoint, consistently.
+There is a genuine, measurable, sign-stable overpricing of improbable outcomes —
+and it lives entirely inside the bid/ask spread.
+
+## The sign conflict, resolved
+
+`implied-distribution.md`'s open question was that Le (arXiv:2602.19520) reports
+Kalshi weather as **too narrow** at 12-48h while our own `longshot-bias.md`
+implied **too wide**. Measured directly on this run's own bracket data by the
+identical band-slope method:
+
+| source | calibration slope | distance from 1.0 |
+|---|---|---|
+| our `longshot-bias.md` prior | 1.11 | 0.11 |
+| **this run** | **1.0503** | **0.0503** |
+| Le, 24-48h | 0.97 | 0.03 |
+
+Our new measurement sits **between** the two priors, on our own side of 1.0. So
+the effect is real but smaller than our earlier table implied, and the
+disagreement with Le is narrower than it looked — closer to a difference of
+degree than of direction. The most likely explanation remains the one recorded
+before the run: a single fitted slope summarising a relationship that changes
+sign across the price range.
+
+## Why this is the most informative of the six negatives
+
+The first five routes failed because the signal was absent, or was an artefact,
+or the opportunity did not exist. This one failed with the signal **present,
+robust, and correctly signed** — confirmed at the midpoint, confirmed at
+executable prices, confirmed with and without the open tails, and consistent
+with a documented literature on variance risk premia.
+
+It still loses, because a 0.58c edge cannot pay a 1.88c spread. That is not a
+modelling failure or a measurement failure. It is the market being efficient to
+within its own transaction costs, which is the strongest form of the same
+conclusion every other route reached.
+
+## What was not done
+
+- No condor or symmetric structure was tested, deliberately: the quadratic fee
+  peaks at 50c, so a structure that sells the middle pays the most fee exactly
+  where the market is most efficient. Only tail-only trades were evaluated.
+- A maker version — resting an offer rather than crossing the spread — was not
+  tested here. `maker-simulation.md` already measured what happens to resting
+  offers in these markets (adverse selection, −1.56c/contract), and a 0.58c edge
+  does not survive that either, but it has not been measured directly for this
+  specific structure.
