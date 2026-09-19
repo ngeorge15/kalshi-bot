@@ -770,9 +770,21 @@ def format_report(report: dict[str, Any]) -> str:
             f"with a {market_cmp['confidence']:.0%} clustered CI ({market_cmp['ci_low']:.5f}, "
             f"{market_cmp['ci_high']:.5f}) excluding zero."
         )
+    elif market_cmp["ci_high"] is not None and market_cmp["ci_high"] < 0:
+        # Distinct from "inconclusive": the whole CI sits below zero, so this
+        # is a confident loss, not an absence of evidence. Reporting both as
+        # "does not exclude zero" would let a decided negative read as an
+        # open question.
+        lines.append(
+            f"spread_sigma is beaten by the market, confidently: paired Brier improvement "
+            f"{market_cmp['brier_improvement']:.5f} with a {market_cmp['confidence']:.0%} clustered CI "
+            f"({market_cmp['ci_low']:.5f}, {market_cmp['ci_high']:.5f}) lying entirely below zero. "
+            "Beating `single` is not beating the market, and only beating the market matters."
+        )
     else:
         lines.append(
-            "No variant's paired Brier improvement over the market excludes zero at this confidence. "
+            "Inconclusive: spread_sigma's paired Brier improvement over the market does not "
+            "exclude zero in either direction at this confidence. "
             "Beating `single` is not beating the market, and only beating the market matters."
         )
 

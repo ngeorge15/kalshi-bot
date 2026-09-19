@@ -416,7 +416,11 @@ def _dummy_comparison(n_events=2, improvement=0.01, ci_low=0.001, ci_high=0.02):
     }
 
 
-def _dummy_report(correlation: float, spread_sigma_ci_low: float | None):
+def _dummy_report(
+    correlation: float,
+    spread_sigma_ci_low: float | None,
+    spread_sigma_ci_high: float | None = 0.02,
+):
     from src.research.weather_backtest import calibration_bins
     calib_rows = [{"p": 0.3, "outcome": 0.0}, {"p": 0.7, "outcome": 1.0}]
     return {
@@ -425,7 +429,11 @@ def _dummy_report(correlation: float, spread_sigma_ci_low: float | None):
             "n_train_pairs": 10, "sigma_floor_f": 1.0,
         },
         "comparisons": {
-            name: _dummy_comparison(ci_low=(spread_sigma_ci_low if name == "spread_sigma_vs_market" else 0.001))
+            name: (
+                _dummy_comparison(ci_low=spread_sigma_ci_low, ci_high=spread_sigma_ci_high)
+                if name == "spread_sigma_vs_market"
+                else _dummy_comparison(ci_low=0.001)
+            )
             for name in em.COMPARISONS
         },
         "calibration": {variant: calibration_bins(calib_rows) for variant in (*em.VARIANTS, "market")},
@@ -453,10 +461,36 @@ class TestFormatReport:
         assert "spread_sigma beats the market" in text
 
     def test_verdict_does_not_overclaim_when_market_ci_includes_zero(self):
-        report = _dummy_report(correlation=0.6, spread_sigma_ci_low=None)
+        """A CI straddling zero is inconclusive and must be named as such."""
+        report = _dummy_report(
+            correlation=0.6, spread_sigma_ci_low=-0.004, spread_sigma_ci_high=0.006
+        )
         text = em.format_report(report)
-        assert "No variant's paired Brier improvement over the market excludes zero" in text
+        assert "Inconclusive" in text
         assert "only beating the market matters" in text
+
+    def test_verdict_calls_a_confident_loss_a_loss_not_an_open_question(self):
+        """A CI lying entirely below zero is a decided negative, not missing evidence.
+
+        Reporting "does not exclude zero" for both cases would let a result
+        we are confident about read as one we know nothing about -- the
+        difference between "we did not beat the market" and "the market beat
+        us, and we can say so with 95% confidence".
+        """
+        report = _dummy_report(
+            correlation=0.6, spread_sigma_ci_low=-0.014, spread_sigma_ci_high=-0.003
+        )
+        text = em.format_report(report)
+        assert "beaten by the market, confidently" in text
+        assert "entirely below zero" in text
+        assert "Inconclusive" not in text
+
+    def test_verdict_with_no_ci_at_all_is_inconclusive(self):
+        report = _dummy_report(
+            correlation=0.6, spread_sigma_ci_low=None, spread_sigma_ci_high=None
+        )
+        text = em.format_report(report)
+        assert "Inconclusive" in text
 
 
 # ---------------------------------------------------------------------------

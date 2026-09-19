@@ -162,3 +162,129 @@ a failure.
 - [Ensemble API — Open-Meteo](https://open-meteo.com/en/docs/ensemble-api)
 - [Exploring GraphCast — Open-Meteo](https://openmeteo.substack.com/p/exploring-graphcast)
 - [GraphCast / WeatherNext — Google DeepMind](https://github.com/google-deepmind/graphcast)
+
+---
+
+# Results
+
+*Run 2026-09-19 on 1,584 assembled city-days (four stations, 2024-12-01 to
+2025-12-31). Fit on 2025-03-01 to 2025-09-30, evaluated on 2025-10-01 to
+2025-12-31 — both inside the training window. The 2026 holdout remains unspent.*
+
+## Both halves of the proposal were right, and it still loses
+
+### Point accuracy: bias was hiding everything
+
+Raw MAE across the 924 days where all six models are present ranks the models
+one way; after removing each model's per-station bias — which is what the model
+actually does — it ranks them almost the other way.
+
+| model | raw MAE | debiased MAE |
+|---|---|---|
+| **ensemble mean** | 2.35F | **1.40F** |
+| `ncep_nbm_conus` | 2.27F | 1.52F |
+| `ecmwf_aifs025_single` | **3.25F** | 1.56F |
+| `icon_seamless` | 2.21F | 1.75F |
+| `ukmo_global_deterministic_10km` | 2.68F | 1.99F |
+| `gfs_seamless` | 2.49F | 2.03F |
+| `ecmwf_ifs025` | 2.91F | 2.05F |
+
+Two things worth keeping. **The ensemble mean beats every single model**,
+including NBM, by 8% once bias is removed — combining does work here. And
+**AIFS looked like the worst model in the set and is nearly the second best**:
+its raw MAE of 3.25F was almost entirely a -3.04F constant bias, which any
+bias-correction step removes for free. Judging a model by raw MAE when the
+consumer bias-corrects is judging the wrong quantity. The earlier 25-day probe
+that flattered AIFS and the full-year raw table that condemned it were both
+measuring bias, not skill.
+
+### Spread genuinely predicts error
+
+On debiased ensemble residuals across 924 days, the spread-skill correlation is
+**0.295**, and it is monotone:
+
+| spread quartile | mean spread | mean absolute residual |
+|---|---|---|
+| lowest | 0.79F | 0.97F |
+| 2nd | 1.22F | 1.25F |
+| 3rd | 1.66F | 1.51F |
+| highest | 2.48F | 1.86F |
+
+In the fitted model, `b = 0.4579` with a standard error of `0.0635` — about
+seven standard errors from zero. The premise of the whole experiment holds:
+days when six models disagree really are harder days, and a constant sigma was
+throwing that information away.
+
+### The market still wins
+
+Paired Brier improvement over the market, event-clustered, 352 events:
+
+| variant | vs market | 95% CI |
+|---|---|---|
+| `single` (old model) | −0.01631 | (−0.02016, −0.01242) |
+| `ensemble_mean` | −0.01249 | (−0.01659, −0.00834) |
+| `spread_sigma` | **−0.00862** | (−0.01408, −0.00342) |
+
+And the internal comparisons, which say *which* change helped:
+
+| comparison | improvement | 95% CI |
+|---|---|---|
+| `ensemble_mean` vs `single` | +0.00382 | (0.00091, 0.00662) |
+| `spread_sigma` vs `ensemble_mean` | +0.00387 | (0.00040, 0.00706) |
+| `spread_sigma` vs `single` | +0.00769 | (0.00282, 0.01254) |
+
+**Both changes helped, by almost exactly the same amount, and both CIs exclude
+zero.** Together they closed **47%** of the gap to the market, from −0.0163 to
+−0.0086.
+
+And the market still wins, with the confidence interval lying entirely below
+zero. This is not an inconclusive result — it is a decided loss. The report's
+verdict line was corrected to say so: an interval wholly below zero means the
+market beat us and we can state it at 95% confidence, which is a different
+claim from "we could not tell". Reporting both as "does not exclude zero" would
+have let a settled negative read as an open question.
+
+## What this actually establishes
+
+The honest reading is that the forecasting route is now closed much more firmly
+than before, because the obvious fix worked and was not enough.
+
+Before this, "our model is primitive" was a live excuse for the 0.019 gap. It
+is no longer available. Six models, a proper ensemble mean, and a
+state-dependent sigma fitted on a real and strongly significant spread-skill
+relationship — the standard professional toolkit, correctly applied — recovers
+under half the gap. Closing the rest would require beating a market that
+presumably already does all of this, using only free public data.
+
+That is a more useful conclusion than the original negative. The first said
+"our model lost". This one says "the known fixes work, are measurable, and
+still lose", which is a statement about the market rather than about us.
+
+## A side finding on the sign conflict
+
+`implied-distribution.md` records a conflict: Le (arXiv:2602.19520) reports
+Kalshi weather prices as *too extreme* at 12-48h, our own `longshot-bias.md`
+finds them *compressed*. The market calibration table from this run, at the
+same horizon, lands with our measurement:
+
+| market bin | n | mean price | empirical |
+|---|---|---|---|
+| [0.0,0.1) | 1061 | 0.033 | **0.011** |
+| [0.1,0.2) | 268 | 0.146 | **0.104** |
+| [0.5,0.6) | 107 | 0.540 | **0.636** |
+
+Cheap brackets settle YES a third as often as priced; expensive ones more often
+than priced. That is longshots overpriced — the opposite of "prices too
+extreme". Two independent measurements on our data now point the same way,
+which shifts the burden onto the reconciliations listed in
+`implied-distribution.md`, most likely that a single fitted slope is being
+asked to summarise a relationship that changes sign at 35c.
+
+## What is not yet done
+
+- `lead2` was not evaluated; only `lead1`.
+- The evaluation split is inside the training window. Nothing here has touched
+  the 2026 holdout, and nothing should until a protocol is declared.
+- UKMO's 71.6% coverage and AIFS's 79.8% mean the six-model spread is often a
+  four- or five-model spread. `n_models` is recorded per row; the sensitivity
+  of the spread-skill relationship to `min_models` has not been measured.
