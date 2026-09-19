@@ -138,6 +138,21 @@ def test_missing_env_var(monkeypatch, test_private_key_path):
         Config()
 
 
+def test_private_key_path_expands_user(monkeypatch, tmp_path):
+    """KALSHI_PRIVATE_KEY_PATH with a leading ~ is expanded, not used literally."""
+    fake_home = tmp_path / "home"
+    key_dir = fake_home / ".kalshi"
+    key_dir.mkdir(parents=True)
+    (key_dir / "key.pem").write_text("not a real key, only path expansion is under test")
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("KALSHI_API_KEY_ID", "test-key-id")
+    monkeypatch.setenv("KALSHI_PRIVATE_KEY_PATH", "~/.kalshi/key.pem")
+    monkeypatch.setenv("KALSHI_ENV", "demo")
+    from src.config import Config
+    cfg = Config()
+    assert cfg.private_key_path == str(key_dir / "key.pem")
+
+
 def test_dollars_to_cents():
     """dollars_to_cents('0.6500') returns 65."""
     from src.kalshi.auth import dollars_to_cents

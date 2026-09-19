@@ -50,7 +50,7 @@ class Config:
     def __init__(self, env_override: str | None = None) -> None:
         # Required credentials — raises KeyError if missing (per R1.10)
         self.api_key_id: str = os.environ["KALSHI_API_KEY_ID"]
-        self.private_key_path: str = os.environ["KALSHI_PRIVATE_KEY_PATH"]
+        self.private_key_path: str = os.path.expanduser(os.environ["KALSHI_PRIVATE_KEY_PATH"])
 
         # Environment: demo or production
         self.env: str = env_override if env_override is not None else os.getenv("KALSHI_ENV", "demo")
