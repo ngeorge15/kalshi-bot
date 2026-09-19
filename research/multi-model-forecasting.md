@@ -280,11 +280,59 @@ which shifts the burden onto the reconciliations listed in
 `implied-distribution.md`, most likely that a single fitted slope is being
 asked to summarise a relationship that changes sign at 35c.
 
+## Sensitivity: the mechanism replicates, the significance is data-limited
+
+Two checks that were listed as outstanding, now run.
+
+**`min_models` does not bind below 6.** Every evaluation-window row carries all
+six models; the training window is 592 rows at six models and 264 at five. So
+`min_models` of 2, 3, 4 and 5 produce byte-identical results — not because the
+flag is inert (it is wired correctly) but because nothing is excluded. Only
+`min_models = 6` bites, dropping training pairs from 819 to 568:
+
+| | default (`min_models`<=5) | `min_models=6` |
+|---|---|---|
+| spread-skill correlation | 0.2448 | 0.2295 |
+| `b` (se) | 0.4579 (0.0635) | 0.4406 (0.0785) |
+| `spread_sigma` vs market | −0.00862 (−0.01408, −0.00342) | −0.00927 (−0.01489, −0.00388) |
+| `spread_sigma` vs `ensemble_mean` | +0.00387 (0.00040, 0.00706) | +0.00325 (**−0.00045**, 0.00669) |
+
+The sigma benefit **loses significance** at `min_models=6`. Worth reading
+carefully: the point estimate barely moves (0.00387 → 0.00325) while the
+interval widens, which is what a real effect looks like with 30% less data —
+not what an artefact looks like, since an artefact would be expected to shift
+rather than merely blur. It is still a warning that this effect is modest
+enough to be data-limited at our sample size.
+
+**The mechanism replicates at a different lead.** Re-run at `lead2` (two-day
+lead):
+
+| comparison | lead1 | lead2 |
+|---|---|---|
+| `single` vs market | −0.01631 | −0.02368 |
+| `ensemble_mean` vs market | −0.01249 | −0.02050 |
+| `spread_sigma` vs market | −0.00862 | −0.01684 |
+| `ensemble_mean` vs `single` | +0.00382 | +0.00318 |
+| `spread_sigma` vs `ensemble_mean` | +0.00387 | +0.00366 |
+| `spread_sigma` vs `single` | +0.00769 | +0.00684 |
+| spread-skill correlation | 0.2448 | 0.2636 |
+
+The two **internal** improvements are nearly identical at both leads, and the
+spread-skill correlation is slightly *higher* at the longer lead, where models
+disagree more. A fitted artefact would not be expected to reproduce itself at
+a different lead with the same magnitude. This is the strongest evidence yet
+that the spread-skill mechanism is real.
+
+The gap to the market, meanwhile, roughly doubles at lead2 (−0.0086 →
+−0.0168). Our model degrades faster with lead than the market's does, which is
+itself informative: whatever the market knows that we do not, it matters more
+at two days than at one.
+
 ## What is not yet done
 
-- `lead2` was not evaluated; only `lead1`.
 - The evaluation split is inside the training window. Nothing here has touched
   the 2026 holdout, and nothing should until a protocol is declared.
-- UKMO's 71.6% coverage and AIFS's 79.8% mean the six-model spread is often a
-  four- or five-model spread. `n_models` is recorded per row; the sensitivity
-  of the spread-skill relationship to `min_models` has not been measured.
+- Why the market's advantage grows with lead has not been investigated. The
+  obvious hypothesis — that the market uses a true ensemble rather than a
+  six-model proxy, and true ensemble spread matters more at longer leads —
+  is untested.
