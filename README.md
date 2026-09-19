@@ -8,6 +8,13 @@ The paper package has no exchange order or cancellation methods and does not loa
 Kalshi credentials. It stores experiments in a separate database. Existing legacy
 exchange/trading modules remain in `src/`; the paper CLI does not invoke them.
 
+## Findings
+
+Seven routes to a tradeable edge were tested against Kalshi weather and NBA
+markets; none survives fees. The evidence, the controls that make the negatives
+credible, and the mistakes corrected along the way are in
+[research/README.md](research/README.md).
+
 ## Try the complete offline example
 
 From this directory, using Python 3.10+ (the paper simulator uses the standard
