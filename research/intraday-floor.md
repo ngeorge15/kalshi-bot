@@ -107,3 +107,102 @@ collection before any conclusion is drawn about live trading.
 ## Results
 
 *Not yet run. This section will be appended, not substituted for the above.*
+
+---
+
+# Results
+
+*Run 2026-09-19 over 2024-10-24 to 2025-12-31, four stations, 1,736 event-days.
+The design section above has not been edited.*
+
+## Verdict: FALSIFIED, as predeclared
+
+| safety margin | brackets called dead | settled YES | rate |
+|---|---|---|---|
+| 0.0F | 4386 | 1 | 0.0002 |
+| 1.0F | 3566 | 1 | 0.0003 |
+| **2.0F (headline)** | **2803** | **1** | **0.0004** |
+| 3.0F | 2067 | 1 | 0.0005 |
+
+The predeclaration was explicit: *a non-zero ASOS-dead / settled-YES rate at a
+safety margin of 2F breaks the premise and the strategy is dead, whatever the
+P&L says.* The rate is non-zero. The strategy is dead.
+
+## The single case, diagnosed
+
+One event carries the entire verdict, so it is worth knowing what it was.
+
+**KNYC, 2024-12-29, `KXHIGHNY-24DEC29-B59.5`, bounds [58.5, 60.5).** ASOS
+running max at the 18:01Z decision instant: **68.0F** from 13 observations. The
+market settled into that very bracket.
+
+The day's ASOS sequence (local day starts 05:00Z):
+
+```
+05:51Z 53   09:51Z 51   13:51Z 52   17:51Z 68   <- last observation of the day
+06:51Z 53   10:51Z 51   14:51Z 56
+07:51Z 56   11:51Z 51   15:51Z 56
+08:51Z 53   12:51Z 51   16:51Z 61
+```
+
+The official NWS CLI daily maximum for KNYC that day — the value the contract
+settled against, and the value in this repo's own observed-max dataset — was
+**60.0F**. So the settlement was correct and ASOS was the outlier, by 8F.
+
+The reading has the signature of bad data rather than a genuine source
+disagreement: a 7F jump in one hour, at the end of a day whose station record
+stops abruptly at 17:51Z with no further observations. A station fault, with
+the faulty value recorded just before the record ends.
+
+**That diagnosis does not rescue the result.** Dropping the one case that
+breaks a hypothesis, after seeing that it breaks it, is precisely the move the
+predeclaration exists to prevent. What it does is define a *different*
+hypothesis: the same strategy with an observation quality-control filter — for
+example refusing a reading that jumps more than some threshold in an hour
+unless a later observation confirms it. That is a new idea. It would need its
+own predeclaration and its own evaluation, and it must not be tested on this
+same data, where the one case it is designed to catch is already known.
+
+## It dies a second time, independently
+
+Even granting a perfect premise, the strategy is not a strategy.
+
+| margin | opportunities / city-day | fraction still bid >=1c | trades in 1,736 event-days |
+|---|---|---|---|
+| 0.0F | 2.53 | 1.1% | 50 |
+| 1.0F | 2.05 | 0.5% | 17 |
+| **2.0F** | **1.62** | **0.2%** | **7** |
+| 3.0F | 1.19 | 0.1% | 3 |
+
+Dead brackets are common — about 1.6 per city-day at the headline margin, some
+2,800 over the period. Bids on them are almost nonexistent: **99.8% of
+arithmetically dead brackets have already been zeroed out by the time we could
+act.** Seven trades in fourteen months across four cities is not a strategy
+regardless of its hit rate, and the market's speed here is the reason.
+
+For completeness, the P&L was positive — 7 trades, 100% hit rate, +250c at the
+headline margin, concentrated in the first 15 minutes after the observation.
+That number is reported because it was predeclared, not because it means
+anything at n=7 under a falsified premise.
+
+## The limitation that stands
+
+Bid **depth** could not be computed. Kalshi candlesticks carry close price,
+volume and open interest, never a bid size, so "is there enough size to matter"
+is unanswerable retrospectively. No proxy was substituted. Top-of-book size is
+available live through `src/live/recorder.py`, which is where that question
+would have to be answered — and given the availability numbers above, it is not
+worth answering.
+
+## What this closes
+
+This was the fifth route tested and the fifth to fail, and it failed in the
+most useful way available: on a predeclared test, for a reason that was named
+in advance as the thing most likely to kill it. The bound check found the same
+single event from the other direction (1 of 1,736 event-days where the settled
+high fell below the ASOS running max), which is a consistency check on the
+measurement rather than an independent finding.
+
+The honest summary is that the market zeroes out arithmetically dead brackets
+essentially immediately, and the one time our observation feed disagreed with
+settlement, our feed was wrong.
